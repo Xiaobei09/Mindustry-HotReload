@@ -75,7 +75,8 @@ jobs:
           cp server/build/libs/server-release.jar dist/Mindustry-HotReload-server.jar
           cp hotreload-agent/build/libs/hotreload-agent.jar dist/
           cp -r devdata/mods/overlay dist/mods/overlay
-          ls -la dist/ dist/mods/
+          (cd dist && zip -r mods-overlay.zip mods/overlay && rm -rf mods)
+          ls -la dist/
 
       - name: Publish nightly release
         env:
@@ -105,6 +106,7 @@ jobs:
             dist/Mindustry-HotReload.jar \
             dist/Mindustry-HotReload-server.jar \
             dist/hotreload-agent.jar \
+            dist/mods-overlay.zip \
             --title "Nightly hot-reload build ($(date -u +%Y-%m-%d))" \
             --notes-file notes.md
 
