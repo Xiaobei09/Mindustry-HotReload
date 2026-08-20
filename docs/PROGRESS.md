@@ -102,6 +102,27 @@
 - fork 需 `Settings → Actions → Workflows permissions = Read and write`（已用 API 设置）
 - actions/checkout 用 v5（v4 是 Node20 已弃用）
 
+## 7.5 多目录热重载 + 模组接入方式（2026-08-21 验证）
+
+- `OverlayMods` 现支持 `-Doverlay.dirs=a,b,c` 监控多个目录 Mod（默认 `overlay`），
+  逗号分隔；watcher 取所有目录 mtime 最大值，任一变化即统一 `reload()` 全部 watched 目录。
+- **热替换约束**：只能改方法体（字段/方法/嵌套类增删会导致 redefine 静默失败）。
+  故 `overlay.dirs` 用 `System.getProperty` 在方法体内读取，不新增成员；`overlayName`
+  字段改为运行时初始化（去掉 ConstantValue），实测 redefine 仍成功。
+- desktop/build.gradle 的 hotreloadRun 透传 gradle 的 `-Doverlay.dirs` 到游戏 JVM
+  （`System.getProperty` 判断非空则 `jvmArgs("-Doverlay.dirs=...")`），
+  命令行 `./gradlew :desktop:hotreloadRun -Doverlay.dirs=overlay,mymod` 即可。
+- **目录 Mod 的 Java 主类加载条件**：`mod.hjson` 必须给 `minGameVersion`（如 "160"），
+  否则 `Version.isAtLeast("0")` 为 true 但 `meta.getMinMajor() >= minJavaModGameVersion`
+  为 false → main 类不加载 → loader=null → `reloadMod` 开头 guard 直接返回 false（静默）。
+  缺失时启动无报错但无法热重载 Java 内容。
+- 多目录实测（desktop 客户端）：mymod(Java jade + HJSON my-ore)、overlay(silver + demo-ore
+  + demo-plasma) 各 2/3 项，任一目录 touch 均触发两目录统一重载（2 mod(s) reloaded）。
+- **syncDev 会覆盖 devdata**：手动只加在 devdata 的内容（demo-panel/demo-plasma）会被
+  `:overlay:syncDev` 冲掉 → 应把示例内容加入 `overlay/` 源（已补 demo-plasma.json、
+  blocks/demo-panel.json、sprites/demo-panel.png）。
+- 接入方式文档：`docs/MODS.md`（目录 Mod / jar·zip / scripts/main.js / Plugin / 多目录）。
+
 ## 8. 恢复后续工作步骤（若上下文丢失）
 
 ```bash

@@ -1,0 +1,9 @@
+{
+  name: demo-panel
+  category: turret
+  health: 400
+  size: 1
+  requirements: [
+    copper/5
+  ]
+}
