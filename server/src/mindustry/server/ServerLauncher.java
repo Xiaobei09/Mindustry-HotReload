@@ -40,7 +40,10 @@ public class ServerLauncher implements ApplicationListener{
 
     @Override
     public void init(){
-        Core.settings.setDataDirectory(Core.files.local("config"));
+        //HOTRELOAD: honor the same data-dir override as the client (MINDUSTRY_DATA_DIR / -Dmindustry.data.dir),
+        //so dev runs can point the mods folder at a repo-local directory without touching the real data dir.
+        String dataDir = System.getProperty("mindustry.data.dir", OS.env("MINDUSTRY_DATA_DIR"));
+        Core.settings.setDataDirectory(dataDir != null ? Core.files.absolute(dataDir) : Core.files.local("config"));
         loadLocales = false;
         headless = true;
 

@@ -439,8 +439,6 @@ public class Mods implements Loadable{
     @Override
     public void loadSync(){
         loadIcons();
-        //HOTRELOAD: start the overlay content watcher (no-op if the overlay mod is absent)
-        OverlayMods.init();
     }
 
     // -----------------------------------------------------------------------------------
@@ -682,6 +680,10 @@ public class Mods implements Loadable{
 
         sortMods();
         buildFiles();
+
+        //HOTRELOAD: start the overlay content watcher (no-op if the overlay mod is absent).
+        //Hooked here (not loadSync) because the headless server never runs the Loadable chain.
+        OverlayMods.init();
     }
 
     private void sortMods(){

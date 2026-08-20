@@ -49,12 +49,17 @@ public class OverlayMods{
     }
 
     private static void watchLoop(){
+        boolean baseline = false;
         while(true){
             try{
                 Fi dir = overlayDir();
                 if(dir != null){
                     long mtime = latestModTime(dir);
-                    if(mtime > lastReloadTime){
+                    if(!baseline){
+                        //first scan: record the baseline without reloading anything
+                        lastReloadTime = mtime;
+                        baseline = true;
+                    }else if(mtime > lastReloadTime){
                         if(changeSeenAt == 0){
                             changeSeenAt = Time.millis();
                         }else if(!reloading && Time.millis() - changeSeenAt > debounce){

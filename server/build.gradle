@@ -41,8 +41,11 @@ tasks.register('hotreloadRun', JavaExec){
     mainClass = project.mainClassName
     classpath = sourceSets.main.runtimeClasspath
     standardInput = System.in
-    workingDir = rootProject.file('devdata')
+    workingDir = project.assetsDir
     ignoreExitValue = true
+
+    //HOTRELOAD: repo-local data dir (mods, saves) so the overlay mod is picked up from devdata/mods
+    environment("MINDUSTRY_DATA_DIR", rootProject.file("devdata").path)
 
     jvmArgs += [
         "-javaagent:${rootProject.file('hotreload-agent/build/libs/hotreload-agent.jar')}",
