@@ -40,8 +40,8 @@
 - [x] `hotreload-agent/` 模块：零依赖 Java Agent（premain+agentmain，文件监听，baseline 机制，redefine + transformer）
 - [x] **端到端验证通过**：JVM 进程内 `Demo.value()` 1→2 热替换生效，无需重启
 - [x] core 集成（全部带 `HOTRELOAD` 标记，保持与上游最小 diff）：
-  - `Mods.java`：`loadMod` 改 public、新增 `reloadMod(LoadedMod)`、`packModSprites()`、`loadSync()` 里启动 `OverlayMods.init()`
-  - `OverlayMods.java`（新文件）：overlay 目录监听、debounce、`reload()`（含 UI 重建 `Vars.ui.hudfrag.blockfrag.rebuild()`）
+  - `Mods.java`：`loadMod` 改 public、新增 `reloadMod(LoadedMod)`、`packModSprites()`、`load()` 末尾启动 `OverlayMods.init()`（**注意：不能挂 loadSync()，服务端不走 Loadable 链**）
+  - `OverlayMods.java`（新文件）：overlay 目录监听、debounce、首次扫描 baseline（防启动误重载）、`reload()`（含 UI 重建 `Vars.ui.hudfrag.blockfrag.rebuild()`）
 - [x] `overlay/` 示例内容 mod：`mod.hjson` + Java（新物品 silver、自定义逻辑发电机 demo-generator、墙体 demo-wall）+ HJSON 物品 demo-ore + 生成的 PNG 贴图
 - [x] `desktop/build.gradle`：新增 `hotreloadRun` 任务（挂 agent、设 devdata、部署 overlay）
 - [x] `scripts/dev-run.sh`、`scripts/dev-compile.sh`
@@ -54,24 +54,30 @@
 
 ## 5. 当前状态
 
-- CI workflow `Sync & Release` run 32368517027：
-  - `Sync upstream` 任务 ✅ 成功（43s）
-  - `Build & publish nightly` 任务 🔄 进行中（首次运行需下载 Gradle/依赖，耗时长）
+- CI workflow `Sync & Release` 已成功跑通两次，nightly Release 已发布（4 个资产：Mindustry-HotReload.jar / server jar / hotreload-agent.jar / mods-overlay.zip），每日 02:00 UTC 自动运行
+- **无头服务端真机验证全链路通过**（2026-08-20）：
+  - agent 挂载 + overlay watcher 启动（服务端）
+  - 新增物品 HJSON → 自动 reload mod（`HOTRELOAD: reloaded mod 'overlay'`）
+  - 改 `OverlayMods.java` → `:core:compileJava` → 运行中进程 hot-swapped，新代码立即生效（日志变 v2 后改回）
+  - 删除物品文件 → 自动 reload（修复：目录 mtime 也要统计，否则删除不可见）
+  - demo-ore.json 的 `type` 字段在 v8 报 "Unknown field"（v8 由目录决定类型），已移除
+- git 提交身份修复：历史 6 个 commit 作者 root→Xiaobei09（filter-branch + force-push 已推送）
+- 服务端数据目录修复：`ServerLauncher` 支持 `MINDUSTRY_DATA_DIR`/`mindustry.data.dir`，`server:hotreloadRun` 用 `workingDir=core/assets` + env 指向 `devdata`（否则 Fi 按 CWD 解析会写错位置）
 - 本地工作树已 clean（除 gitignore 的 devdata 等）
+- 服务端 hotreloadRun 进程仍在后台运行（端口 6567，日志 `devdata/server-hotreload.log`），可作活体演示；停掉：`pkill -f ServerLauncher`
 
 ## 6. 待办 / 下一步
 
-- [ ] 确认 CI Build 任务完成且 nightly Release 发布成功（`gh release view nightly`）
-- [ ] 若 CI 失败：查看构建日志修复（大概率是 sprite packing/tools:pack 或依赖下载问题）
-- [ ] （可选）验证 release 的 `mods/overlay` 目录包含编译后的 class（syncDev 已生成）
-- [ ] （可选）把 `:core:compileJava --continuous` 集成进 dev-run.sh 的单命令体验（已有，未实测）
-- [ ] （可选）真机试玩：本地 `./gradlew :desktop:hotreloadRun` 起游戏验证 overlay 热重载 UI 流程
+- [ ] （可选）桌面端真机试玩：`./gradlew :desktop:hotreloadRun` 验证 overlay 热重载 UI 流程（服务端已验证，客户端逻辑一致）
+- [ ] （可选）新内容热加载后的视觉确认（区块重建等）
+- [ ] （可选）把 `:core:compileJava --continuous` 集成进 dev-run.sh 单命令体验
 
 ## 7. 关键技术细节与踩坑记录
 
 ### v8 与 v7 的 API 差异（本 fork 是 Mindustry v8）
 - **没有 `ContentList`**：mod 主类继承 `mindustry.mod.Mod`，内容写在 `loadContent()`（不是 `load()`）
 - **没有 `Recipes` 类**：无全局配方表，内容重载无需重建配方
+- **`type` 字段在 HJSON 里是多余字段**：v8 内容类型由目录决定（content/items/ 下即 Item），写了会报 "Unknown field" 警告
 - `Category` 在 `mindustry.type` 包（不在 world.meta）
 - `MappableContent` 构造时自动加 mod 名前缀（`content.transformName`），Java 内容名字无需手写前缀
 - 方块自定义逻辑：Block 子类内写 `public class XxxBuild extends Building` 内部类，自动注册为 buildType
