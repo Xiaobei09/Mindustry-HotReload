@@ -123,6 +123,21 @@
   blocks/demo-panel.json、sprites/demo-panel.png）。
 - 接入方式文档：`docs/MODS.md`（目录 Mod / jar·zip / scripts/main.js / Plugin / 多目录）。
 
+## 7.6 WSL2 / opencode 崩溃缓解（内存不足）
+
+- 现象：WSL2 总内存仅 3.3GB，gradle daemon(~1.2GB)+客户端(-Xmx1g)+opencode(node) 多 JVM
+  并存 → OOM 被杀（曾见客户端两次崩溃：OOM、GLXBadFBConfig 后软渲染解决）。
+- Windows 侧 `C:\Users\<用户>\.wslconfig`：
+  ```ini
+  [wsl2]
+  memory=8GB
+  swap=4GB
+  ```
+  改后 `wsl --shutdown` 重启 WSL（IP 会变，portproxy 需同步更新）。
+- 日常省内存：构建完 `./gradlew --stop`；不要同时跑服务端+客户端；
+  客户端启动用 `-Dorg.gradle.jvmargs=-Xmx768m` 且 desktop 任务已内置 `-Xmx1g`。
+- opencode 崩溃同因内存，加内存后自然缓解。
+
 ## 8. 恢复后续工作步骤（若上下文丢失）
 
 ```bash
