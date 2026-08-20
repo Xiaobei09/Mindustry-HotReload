@@ -89,11 +89,12 @@ public class OverlayMods{
         }
     }
 
-    /** Latest modification time across all files of the overlay mod (content + classes). */
+    /** Latest modification time across all files/dirs of the overlay mod (content + classes).
+     *  Directory mtimes are included so deletions are detected too. */
     private static long latestModTime(Fi dir){
         long[] max = {dir.lastModified()};
         dir.walk(f -> {
-            if(!f.isDirectory() && f.lastModified() > max[0]){
+            if(f.lastModified() > max[0]){
                 max[0] = f.lastModified();
             }
         });
