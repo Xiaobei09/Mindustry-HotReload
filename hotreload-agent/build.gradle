@@ -1,0 +1,21 @@
+//HOTRELOAD: standalone JVM agent for in-process class hot-swap.
+apply plugin: 'java'
+
+tasks.withType(JavaCompile){
+    targetCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = JavaVersion.VERSION_17
+    options.encoding = 'UTF-8'
+}
+
+jar{
+    archiveFileName = 'hotreload-agent.jar'
+
+    manifest{
+        attributes(
+            'Premain-Class': 'mindustry.hotreload.HotReloadAgent',
+            'Agent-Class': 'mindustry.hotreload.HotReloadAgent',
+            'Can-Redefine-Classes': 'true',
+            'Can-Retransform-Classes': 'true'
+        )
+    }
+}

@@ -38,6 +38,46 @@ tasks.register('run', JavaExec){
     }
 }
 
+//HOTRELOAD: dev run with the in-process hot-swap agent + overlay content watcher.
+tasks.register('hotreloadRun', JavaExec){
+    dependsOn classes
+    dependsOn ':core:compileJava'
+    dependsOn ':hotreload-agent:jar'
+    dependsOn ':overlay:syncDev'
+    mainClass = project.mainClassName
+    classpath = sourceSets.main.runtimeClasspath
+    standardInput = System.in
+    workingDir = project.assetsDir
+    ignoreExitValue = true
+
+    if(System.getProperty("os.name").toLowerCase().contains("mac")){
+        jvmArgs("-XstartOnFirstThread")
+    }
+
+    jvmArgs += [
+        "-javaagent:${rootProject.file('hotreload-agent/build/libs/hotreload-agent.jar')}",
+        "-Dhotreload.dir=${rootProject.file('core/build/classes/java/main').path}",
+        "-Dhotreload.poll=800",
+        "-Dhotreload.debounce=300",
+        "-XX:+ShowCodeDetailsInExceptionMessages"
+    ]
+
+    if(project.hasProperty("args")){
+        args Eval.me(project.getProperties()["args"])
+    }
+
+    if(project.hasProperty("jvmArgs")){
+        jvmArgs((List<String>) Eval.me(project.getProperties()["jvmArgs"]))
+    }
+
+    //dev data dir: keeps the overlay mod and saves inside the repo, away from real saves
+    environment("MINDUSTRY_DATA_DIR", rootProject.file("devdata").path)
+
+    if(args.contains("debug")){
+        mainClass = "mindustry.debug.DebugLauncher"
+    }
+}
+
 tasks.register('dist', Jar){
     dependsOn configurations.runtimeClasspath
     dependsOn ":desktop:processResources"

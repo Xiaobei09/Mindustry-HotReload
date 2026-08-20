@@ -439,6 +439,110 @@ public class Mods implements Loadable{
     @Override
     public void loadSync(){
         loadIcons();
+        //HOTRELOAD: start the overlay content watcher (no-op if the overlay mod is absent)
+        OverlayMods.init();
+    }
+
+    // -----------------------------------------------------------------------------------
+    // HOTRELOAD: runtime hot-reload of a single mod (used by the overlay dev mod).
+    // Disposes the mod's content and classloader, reloads it from disk with a fresh
+    // classloader, then re-initializes content and re-packs sprites. No restart needed.
+    // -----------------------------------------------------------------------------------
+    public boolean reloadMod(LoadedMod mod){
+        if(mod == null || mod.loader == null || android || ios || skipModCode) return false;
+
+        try{
+            //dispose all content owned by this mod
+            for(ContentType type : ContentType.all){
+                for(Content c : content.getBy(type).copy()){
+                    if(c.minfo.mod == mod){
+                        content.remove(c);
+                    }
+                }
+            }
+
+            //close the old classloader and drop the old mod entry
+            ClassLoaderCloser.close(mod.loader);
+            mod.dispose();
+            int index = mods.indexOf(mod);
+            mods.remove(mod);
+            lastOrderedMods = null;
+
+            //reload from disk with a fresh classloader, keeping the same position in the mod list
+            LoadedMod reloaded = loadMod(mod.file, false, true);
+            if(reloaded == null){
+                return false;
+            }
+            reloaded.state = ModState.enabled;
+            if(index >= 0){
+                mods.insert(index, reloaded);
+            }else{
+                mods.add(reloaded);
+            }
+
+            //re-initialize the fresh mod's content
+            content.setCurrentMod(reloaded);
+            for(ContentType type : ContentType.all){
+                for(Content c : content.getBy(type)){
+                    if(c.minfo.mod == reloaded){
+                        try{ c.init(); }catch(Throwable e){ Log.err("HOTRELOAD: init error for '@'", c, e); }
+                    }
+                }
+            }
+            for(ContentType type : ContentType.all){
+                for(Content c : content.getBy(type)){
+                    if(c.minfo.mod == reloaded){
+                        try{ c.postInit(); }catch(Throwable e){ Log.err("HOTRELOAD: postInit error for '@'", c, e); }
+                    }
+                }
+            }
+            content.setCurrentMod(null);
+
+            if(!headless){
+                //pack new sprites into the atlas and reload icons for the fresh mod
+                packModSprites(reloaded);
+                for(ContentType type : ContentType.all){
+                    for(Content c : content.getBy(type)){
+                        if(c.minfo.mod == reloaded){
+                            try{ c.loadIcon(); }catch(Throwable e){ Log.err("HOTRELOAD: loadIcon error for '@'", c, e); }
+                            try{ c.load(); }catch(Throwable e){ Log.err("HOTRELOAD: load error for '@'", c, e); }
+                        }
+                    }
+                }
+            }
+
+            Log.info("HOTRELOAD: reloaded mod '@'", reloaded.name);
+            return true;
+        }catch(Throwable e){
+            Log.err("HOTRELOAD: failed to reload mod '@'", mod.name, e);
+            return false;
+        }
+    }
+
+    /** HOTRELOAD: packs a reloaded mod's sprite PNGs into the runtime atlas, mirroring startup naming rules. */
+    private void packModSprites(LoadedMod mod){
+        if(headless || Core.atlas == null) return;
+        Fi spritesDir = mod.root.child("sprites");
+        if(!spritesDir.exists()) return;
+
+        for(Fi file : spritesDir.findAll(f -> f.extEquals("png"))){
+            String baseName = file.nameWithoutExtension();
+            int hyphen = baseName.indexOf('-');
+            boolean prefixed = hyphen != -1 && baseName.substring(hyphen + 1).startsWith(mod.name + "-");
+            String fullName = (prefixed ? "" : mod.name + "-") + baseName;
+
+            if(Core.atlas.getRegionMap().containsKey(fullName)) continue;
+            try{
+                Pixmap pix = new Pixmap(file.readBytes());
+                Texture texture = new Texture(pix);
+                texture.setFilter(TextureFilter.linear);
+                Core.atlas.addRegion(fullName, new TextureRegion(texture));
+                pix.dispose();
+                Log.info("HOTRELOAD: packed sprite '@'", fullName);
+            }catch(Throwable e){
+                Log.err("HOTRELOAD: failed to pack sprite '@'", fullName, e);
+            }
+        }
     }
 
     private PageType getPage(Fi file){
@@ -1083,7 +1187,8 @@ public class Mods implements Loadable{
 
     /** Loads a mod file+meta, but does not add it to the list.
      * Note that directories can be loaded as mods. */
-    private LoadedMod loadMod(Fi sourceFile, boolean overwrite, boolean initialize) throws Exception{
+    //HOTRELOAD: made public so the overlay mod can be reloaded at runtime
+    public LoadedMod loadMod(Fi sourceFile, boolean overwrite, boolean initialize) throws Exception{
 
         ZipFi rootZip = null;
 

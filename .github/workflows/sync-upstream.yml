@@ -1,0 +1,119 @@
+# HOTRELOAD: nightly sync of upstream Mindustry, build, and publish a rolling nightly release.
+# Run manually anytime with the "Run workflow" button (workflow_dispatch).
+name: Sync & Release
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # UTC 02:00 daily
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Sync upstream
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream
+        id: merge
+        run: |
+          git remote add upstream https://github.com/Anuken/Mindustry.git || true
+          git fetch upstream master --tags
+          BEFORE=$(git rev-parse HEAD)
+          git merge --no-edit --no-ff upstream/master || {
+            echo "::error::Merge conflict with upstream. Resolve manually on branch master."
+            exit 1
+          }
+          AFTER=$(git rev-parse HEAD)
+          if [ "$BEFORE" = "$AFTER" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            # keep our hot-reload modifications explicit and visible
+            git log --oneline -5
+          fi
+
+      - name: Push merged changes
+        if: steps.merge.outputs.changed == 'true'
+        run: git push origin master
+
+  build:
+    name: Build & publish nightly
+    needs: sync
+    if: always() && (needs.sync.outputs.changed == 'true' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/caches
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle', 'gradle/wrapper/gradle-wrapper.properties') }}
+
+      - name: Build game, server, hot-swap agent and overlay
+        run: ./gradlew :desktop:dist :server:dist :hotreload-agent:jar :overlay:syncDev --no-daemon
+
+      - name: Package artifacts
+        run: |
+          mkdir -p dist/mods
+          cp desktop/build/libs/Mindustry.jar dist/Mindustry-HotReload.jar
+          cp server/build/libs/server-release.jar dist/Mindustry-HotReload-server.jar
+          cp hotreload-agent/build/libs/hotreload-agent.jar dist/
+          cp -r devdata/mods/overlay dist/mods/overlay
+          ls -la dist/ dist/mods/
+
+      - name: Publish nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="v$(date -u +%Y.%m.%d)"
+          gh release delete nightly --yes || true
+          gh release create nightly \
+            dist/Mindustry-HotReload.jar \
+            dist/Mindustry-HotReload-server.jar \
+            dist/hotreload-agent.jar \
+            --title "Nightly hot-reload build ($(date -u +%Y-%m-%d))" \
+            --notes "Automatically synced from upstream [Anuken/Mindustry](https://github.com/Anuken/Mindustry) and built with the in-process hot-swap agent.
+
+## What's inside
+- **Mindustry-HotReload.jar** — full game with the HOTRELOAD runtime overlay reload built in.
+- **Mindustry-HotReload-server.jar** — headless server (supports overlay content too).
+- **hotreload-agent.jar** — attach it to a running JVM to hot-swap logic changes without restarting.
+- **mods/overlay/** — drop this folder into your game's \`mods\` directory to enable live content editing.
+
+## Dev workflow (requires JDK 17+)
+\`\`\`bash
+git clone https://github.com/${{ github.repository }}.git && cd $(basename ${{ github.repository }})
+./gradlew :overlay:syncDev      # deploy overlay once
+./gradlew :desktop:hotreloadRun # start game with agent + overlay watcher
+# edit core logic  -> ./gradlew :core:compileJava --continuous  (applies live)
+# edit overlay code -> ./gradlew :overlay:syncDev                (applies live)
+\`\`\`"
+
+  notify:
+    name: Notify on failure
+    if: failure()
+    runs-on: ubuntu-latest
+    needs: [sync, build]
+    steps:
+      - name: Comment on latest issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --title "Nightly sync/build failed" \
+            --body "The scheduled upstream sync or build failed. Check the workflow runs for details." || true

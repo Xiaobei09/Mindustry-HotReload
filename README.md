@@ -1,80 +1,119 @@
-![Logo](core/assets-raw/sprites/ui/logo.png)
+# Mindustry-HotReload
 
-[![Build Status](https://github.com/Anuken/Mindustry/workflows/Tests/badge.svg?event=push)](https://github.com/Anuken/Mindustry/actions)
-[![Discord](https://img.shields.io/discord/391020510269669376.svg?logo=discord&logoColor=white&logoWidth=20&labelColor=7289DA&label=Discord&color=17cf48)](https://discord.gg/mindustry)  
+> 保留线上玩法不变（原版 Mindustry + 现有 mod 照常运行），另起一套可**完全热重载**的开发/发布流水线：
+> 自动同步上游源码 → 改逻辑、加物品、加方块 → 进程不重启即时生效 → 自动发布 nightly Release。
 
-The automation tower defense RTS, written in Java.
+这是一个对 [Anuken/Mindustry](https://github.com/Anuken/Mindustry) 的完整 fork，额外加入：
 
-_[Trello Board](https://trello.com/b/aE2tcUwF/mindustry-40-plans)_  
-_[Wiki](https://mindustrygame.github.io/wiki)_  
-_[Javadoc](https://mindustrygame.github.io/docs/)_ 
+- **JVM 热替换 Agent**（`hotreload-agent/`）—— 运行中的游戏进程内直接热替换已加载的类，改核心逻辑（`mindustry.*`）无需重启。
+- **Overlay 内容热重载**（`overlay/`）—— 一个新的独立 mod，新增物品/方块/单位等**内容**以及 mod 内逻辑，改完自动在游戏中重载生效。
+- **GitHub Actions 自动同步**—— 每天自动拉取上游 master、合并、构建，并发布 nightly Release，玩家直接下载即用。
 
-## Contributing
+## 开发工作流（热重载）
 
-See [CONTRIBUTING](CONTRIBUTING.md) for general code style and PR guidelines.
+环境要求：JDK 17+（本仓库用 Gradle wrapper，无本地 Android SDK 也能构建桌面端）。
 
-If you are a first-time contributor looking for features to implement or bugs to fix, see the issues tagged with 'candidate' [in the Mindustry-Suggestions repostiory](https://github.com/Anuken/Mindustry-Suggestions/issues?q=is%3Aissue%20state%3Aopen%20label%3Acandidate).
+```bash
+# 1. 一次性部署 overlay 内容 mod 到 devdata/mods/overlay
+./gradlew :overlay:syncDev
 
-## Building
+# 2. 启动游戏（自动挂上热替换 agent + 开启 overlay 监听）
+./gradlew :desktop:hotreloadRun
+```
 
-Bleeding-edge builds are generated automatically for every commit. You can see them [here](https://github.com/Anuken/MindustryBuilds/releases).
+游戏起来之后，改代码的三种玩法：
 
-If you'd rather compile on your own, follow these instructions.
-First, make sure you have [JDK 17](https://adoptium.net/temurin/releases/?os=any&arch=any&version=17) installed. **Other JDK versions will not work.** Open a terminal in the Mindustry directory and run the following commands:
+| 你改什么 | 操作 | 生效方式 |
+|---|---|---|
+| 核心逻辑（`mindustry.logic.*`、`mindustry.world.*` 等） | `./gradlew :core:compileJava --continuous` | JVM agent 检测到新编译的 class，**当前进程内直接热替换**，无需重启 |
+| overlay 内容/逻辑（新物品、新方块、mod 内逻辑） | `./gradlew :overlay:syncDev` | overlay 监听器检测到变化，**重载整个 overlay mod**（新 classloader + 内容重建 + 贴图打包） |
+| 数值微调（不改代码） | 游戏内 JS 控制台执行 `overlay.OverlayMod.bonus = 5f` | 下个 tick 立即生效 |
 
-### Windows
+> 冷启动时如果 mod 目录（`devdata/mods/`）里有 overlay，游戏会自动加载它；把 `overlay/` 里的内容直接改掉再运行 `:overlay:syncDev` 即可。
 
-_Running:_ `gradlew desktop:run`  
-_Building:_ `gradlew desktop:dist`  
-_Sprite Packing:_ `gradlew tools:pack`
+## 新增物品 / 方块示例
 
-### Linux/Mac OS
+`overlay/src/main/java/overlay/OverlayMod.java` 里内置了示例：
 
-_Running:_ `./gradlew desktop:run`  
-_Building:_ `./gradlew desktop:dist`  
-_Sprite Packing:_ `./gradlew tools:pack`
+- `silver` —— 新物品（纯 Java 声明）
+- `demo-generator` —— 带自定义逻辑的发电机（`DemoGeneratorBuild.updateTile()`），逻辑实时可调
+- `demo-wall` —— 普通新墙体
+- `content/items/demo-ore.json` —— 纯 HJSON 声明的新物品（无需写 Java）
 
-### Server
+新增方块/物品后跑一次 `./gradlew :overlay:syncDev`，游戏内建造菜单会立即出现新方块（`PlacementFragment` 会自动重建）。
 
-Server builds are bundled with each released build (in Releases). If you'd rather compile on your own, replace 'desktop' with 'server', e.g. `gradlew server:dist`.
+## 核心逻辑热替换原理（agent）
 
-### Android
+`hotreload-agent` 是一个零依赖的 Java Agent：
 
-1. Install the Android SDK [here.](https://developer.android.com/studio#command-tools) Make sure you're downloading the "Command line tools only", as Android Studio is not required.
-2. In the unzipped Android SDK folder, find the cmdline-tools directory. Then create a folder inside of it called `latest` and put all of its contents into the newly created folder.
-3. In the same directory run the command `sdkmanager --licenses` (or `./sdkmanager --licenses` if on linux/mac)
-4. Set the `ANDROID_HOME` environment variable to point to your unzipped Android SDK directory.
-5. Enable developer mode on your device/emulator. If you are on testing on a phone you can follow [these instructions](https://developer.android.com/studio/command-line/adb#Enabling), otherwise you need to google how to enable your emulator's developer mode specifically.
-6. Run `gradlew android:assembleDebug` (or `./gradlew` if on linux/mac). This will create an unsigned APK in `android/build/outputs/apk`.
+```
+-javaagent:hotreload-agent.jar
+-Dhotreload.dir=core/build/classes/java/main   # 监听的 class 输出目录
+-Dhotreload.poll=800                            # 轮询间隔 ms
+-Dhotreload.debounce=300                        # 变更去抖 ms
+```
 
-To debug the application on a connected device/emulator, run `gradlew android:installDebug android:run`.
+- 监听 class 输出目录，`.class` 文件 mtime 变化后读取最新字节码。
+- 对已加载的类调用 `Instrumentation.redefineClasses()` 立即生效。
+- 对尚未加载的类通过 `ClassFileTransformer` 在加载时提供最新字节码。
+- 日志写入 `hotreload.log` 与控制台。
 
-### Troubleshooting
+也可以热附加到已运行的服务器（远程调试/线上热修）：
 
-#### Permission Denied
+```bash
+# 找到目标 JVM pid
+jps -l
+# 用 agentmain 附加（JDK 自带 tools 支持 attach 到同机 JVM）
+./gradlew :hotreload-agent:jar
+java -jar hotreload-agent.jar <pid>   # 或者用 jcmd: jcmd <pid> JVMTI.agent_load ...
+```
 
-If the terminal returns `Permission denied` or `Command not found` on Mac/Linux, run `chmod +x ./gradlew` before running `./gradlew`. *This is a one-time procedure.*
+## 自动同步上游 + 发布（CI/CD）
 
-#### Where is the `mindustry.gen` package?
+`.github/workflows/sync-upstream.yml` 每天 02:00 UTC（或手动点击 **Run workflow**）自动执行：
 
-As the name implies, `mindustry.gen` is generated *at build time* based on other code. You will not find source code for this package in the repository, and it should not be edited by hand.
+1. **同步**：拉取 `Anuken/Mindustry` master → 合并到本仓库 `master`（保留本项目的改动；冲突会失败并创建 issue 提醒人工处理）。
+2. **构建**：JDK 17 构建桌面端、服务端、agent、overlay。
+3. **发布**：创建/更新 `nightly` Release，内含：
+   - `Mindustry-HotReload.jar`（完整游戏，含 overlay 重载能力）
+   - `Mindustry-HotReload-server.jar`（无头服务器）
+   - `hotreload-agent.jar`（可附加到任意 JVM 热替换逻辑）
+   - `mods/overlay/`（放入游戏的 `mods` 目录即可开箱体验内容热编辑）
 
-The following is a non-exhaustive list of the "source" of generated code in `mindustry.gen`:
+如需在 fork 上跑工作流：`Settings → Actions → General → Workflow permissions` 选择 **Read and write permissions**（本仓库已配置）。
 
-- `Call`, `*Packet` classes: Generated from methods marked with `@Remote`.
-- All entity classes (`Unit`, `EffectState`, `Posc`, etc): Generated from component classes in the `mindustry.entities.comp` package, and combined using definitions in `mindustry.content.UnitTypes`.
-- `Sounds`, `Musics`, `Tex`, `Icon`, etc: Generated based on files in the respective asset folders.
+## 项目结构
 
----
+```
+├── core/                 # 游戏本体源码（上游）+ HOTRELOAD 标记的最小改动
+│   └── src/mindustry/mod/
+│       ├── Mods.java     # 3 处 HOTRELOAD 标记改动：loadMod 公开、reloadMod()、watcher 钩子
+│       └── OverlayMods.java  # overlay 监听器（文件变化 → 重载 mod → 重建 UI）
+├── hotreload-agent/      # JVM 热替换 Agent（独立模块，零依赖）
+├── overlay/              # 可热重载的示例内容 mod（Java + HJSON + 贴图）
+├── devdata/              # 开发数据目录（保存、mods，gitignore）
+├── scripts/              # dev-run / dev-compile 辅助脚本
+└── .github/workflows/    # 自动同步 + 构建 + 发布
+```
 
-Gradle may take up to several minutes to download files. Be patient. <br>
-After building, the output .JAR file should be in `/desktop/build/libs/Mindustry.jar` for desktop builds, and in `/server/build/libs/server-release.jar` for server builds.
+## 与上游同步冲突
 
-## Feature Requests
+本项目对上游的改动都带 `HOTRELOAD` 标记且极小（`Mods.java` 约 40 行 + 一个新文件 + 两个新模块），日常自动合并极少冲突。若冲突：
 
-Post feature requests and feedback [here](https://github.com/Anuken/Mindustry-Suggestions/issues/new/choose).
+```bash
+git remote add upstream https://github.com/Anuken/Mindustry.git
+git fetch upstream
+git merge upstream/master
+# 手工解决冲突（找 `HOTRELOAD` 标记区域），然后推送即可
+```
 
-## Downloads
+## 构建
 
-| [![](https://static.itch.io/images/badge.svg)](https://anuke.itch.io/mindustry)    |    [![](https://play.google.com/intl/en_us/badges/images/generic/en-play-badge.png)](https://play.google.com/store/apps/details?id=io.anuke.mindustry)   |    [![](https://fdroid.gitlab.io/artwork/badge/get-it-on.png)](https://f-droid.org/packages/io.anuke.mindustry)	| [![](https://flathub.org/assets/badges/flathub-badge-en.svg)](https://flathub.org/apps/details/com.github.Anuken.Mindustry)  
-|---	|---	|---	|---	|
+```bash
+./gradlew :desktop:dist :server:dist :hotreload-agent:jar  # 产出桌面端/服务端/agent
+./gradlew :overlay:syncDev                                 # 部署 overlay 到 devdata
+```
+
+## 许可
+
+Mindustry 采用 GPL-3.0，本仓库同样遵循。详见 [LICENSE](LICENSE)。
