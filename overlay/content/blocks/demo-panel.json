@@ -1,9 +1,10 @@
 {
   name: demo-panel
-  category: turret
-  health: 400
-  size: 1
+  type: Wall
+  category: defense
+  size: 5
+  health: 2500
   requirements: [
-    copper/5
+    copper/10
   ]
 }
