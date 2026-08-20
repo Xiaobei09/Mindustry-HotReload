@@ -138,6 +138,18 @@
   客户端启动用 `-Dorg.gradle.jvmargs=-Xmx768m` 且 desktop 任务已内置 `-Xmx1g`。
 - opencode 崩溃同因内存，加内存后自然缓解。
 
+## 7.7 WSLg 图形界面（2026-08-21 验证）
+
+- WSL2 自带 WSLg（Win11/10 21H2+）：GUI 应用直接显示在 Windows 桌面，无需 VNC/截图。
+  `DISPLAY=:0`(Xwayland) + `WAYLAND_DISPLAY=wayland-0`，/mnt/wslg 存在即启用。
+- 启动：`setsid env DISPLAY=:0 ./gradlew -Dorg.gradle.jvmargs=-Xmx768m :desktop:hotreloadRun -Doverlay.dirs=overlay,mymod`
+  （去掉 xvfb-run）；窗口标题 "Mindustry" 出现在 Windows（可用 `DISPLAY=:0 xwininfo -root -tree` 确认）。
+- **坑：GLXBadFBConfig** —— WSLg Xwayland 上创建 GL context 失败（LIBGL_ALWAYS_SOFTWARE=1 也无法解决），
+  但游戏仍正常运行（窗口 + 渲染正常，日志有 [E] 但无碍）。若黑屏，备选
+  `SDL_VIDEODRIVER=wayland`（EGL 路径）或退回 Xvfb+VNC（/root/screenshot-loop.sh、x11vnc 脚本仍在）。
+- 图形界面下热重载验证：改 demo-ore 颜色→实时变红、改 mymod my-ore→变蓝、touch OverlayMods.class→
+  hot-swapped（均通过）。截图/HTTP/VNC 服务已停（窗口直显，不再需要）。
+
 ## 8. 恢复后续工作步骤（若上下文丢失）
 
 ```bash
