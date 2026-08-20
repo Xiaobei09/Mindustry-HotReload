@@ -81,6 +81,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          cat > notes.md <<'NOTES'
+          Automatically synced from upstream [Anuken/Mindustry](https://github.com/Anuken/Mindustry) and built with the in-process hot-swap agent.
+
+          ## What's inside
+          - **Mindustry-HotReload.jar** — full game with the HOTRELOAD runtime overlay reload built in.
+          - **Mindustry-HotReload-server.jar** — headless server (supports overlay content too).
+          - **hotreload-agent.jar** — attach it to a running JVM to hot-swap logic changes without restarting.
+          - **mods/overlay/** — drop this folder into your game's `mods` directory to enable live content editing.
+
+          ## Dev workflow (requires JDK 17+)
+          ```bash
+          git clone https://github.com/${{ github.repository }}.git && cd $(basename ${{ github.repository }})
+          ./gradlew :overlay:syncDev      # deploy overlay once
+          ./gradlew :desktop:hotreloadRun # start game with agent + overlay watcher
+          # edit core logic   -> ./gradlew :core:compileJava --continuous  (applies live)
+          # edit overlay code -> ./gradlew :overlay:syncDev                (applies live)
+          ```
+          NOTES
           VERSION="v$(date -u +%Y.%m.%d)"
           gh release delete nightly --yes || true
           gh release create nightly \
@@ -88,22 +106,7 @@ jobs:
             dist/Mindustry-HotReload-server.jar \
             dist/hotreload-agent.jar \
             --title "Nightly hot-reload build ($(date -u +%Y-%m-%d))" \
-            --notes "Automatically synced from upstream [Anuken/Mindustry](https://github.com/Anuken/Mindustry) and built with the in-process hot-swap agent.
-
-## What's inside
-- **Mindustry-HotReload.jar** — full game with the HOTRELOAD runtime overlay reload built in.
-- **Mindustry-HotReload-server.jar** — headless server (supports overlay content too).
-- **hotreload-agent.jar** — attach it to a running JVM to hot-swap logic changes without restarting.
-- **mods/overlay/** — drop this folder into your game's \`mods\` directory to enable live content editing.
-
-## Dev workflow (requires JDK 17+)
-\`\`\`bash
-git clone https://github.com/${{ github.repository }}.git && cd $(basename ${{ github.repository }})
-./gradlew :overlay:syncDev      # deploy overlay once
-./gradlew :desktop:hotreloadRun # start game with agent + overlay watcher
-# edit core logic  -> ./gradlew :core:compileJava --continuous  (applies live)
-# edit overlay code -> ./gradlew :overlay:syncDev                (applies live)
-\`\`\`"
+            --notes-file notes.md
 
   notify:
     name: Notify on failure
