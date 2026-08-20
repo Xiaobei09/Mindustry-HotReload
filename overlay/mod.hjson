@@ -5,4 +5,4 @@ author: "Mindustry-HotReload"
 version: "1.0.0"
 minGameVersion: "160"
 main: "overlay.OverlayMod"
-hidden: true
+hidden: false

@@ -115,6 +115,9 @@ public class OverlayMods{
         if(Vars.mods.reloadMod(mod) && !Vars.headless && Vars.ui != null && Vars.ui.hudfrag != null){
             //rebuild the block placement menu so new/removed blocks show up
             Vars.ui.hudfrag.blockfrag.rebuild();
+            //HOTRELOAD-DEMO: core hot-swap marker — count what the overlay now contributes
+            Log.info("[HOTRELOAD] core hot-swap OK: overlay now contributes @ content entries.",
+                Vars.content.getBy(mindustry.ctype.ContentType.item).count(c -> ((mindustry.ctype.MappableContent)c).name.startsWith(mod.name + "-")));
         }
         Log.info("[HOTRELOAD] overlay reload complete.");
     }

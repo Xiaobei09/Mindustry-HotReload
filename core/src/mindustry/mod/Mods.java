@@ -442,10 +442,12 @@ public class Mods implements Loadable{
     }
 
     // -----------------------------------------------------------------------------------
-    // HOTRELOAD: runtime hot-reload of a single mod (used by the overlay dev mod).
-    // Disposes the mod's content and classloader, reloads it from disk with a fresh
-    // classloader, then re-initializes content and re-packs sprites. No restart needed.
-    // -----------------------------------------------------------------------------------
+    /** HOTRELOAD: runtime hot-reload of a single mod (used by the overlay dev mod).
+     * Disposes the mod's content and classloader, reloads it from disk with a fresh
+     * classloader, then re-initializes content and re-packs sprites. No restart needed.
+     * NOTE: no new methods or fields may be added to this class (hot-swap limitation) —
+     *       the per-mod content creation below is inlined into this method body.
+     * -----------------------------------------------------------------------------------*/
     public boolean reloadMod(LoadedMod mod){
         if(mod == null || mod.loader == null || android || ios || skipModCode) return false;
 
@@ -477,6 +479,61 @@ public class Mods implements Loadable{
             }else{
                 mods.add(reloaded);
             }
+
+            //re-create the fresh mod's content (Java + HJSON), mirroring loadContent()
+            class LoadRun implements Comparable<LoadRun>{
+                final ContentType type;
+                final Fi file;
+                final LoadedMod m;
+                LoadRun(ContentType type, Fi file, LoadedMod m){ this.type = type; this.file = file; this.m = m; }
+                @Override
+                public int compareTo(LoadRun l){
+                    int d = m.name.compareTo(l.m.name);
+                    return d != 0 ? d : file.name().compareTo(l.file.name());
+                }
+            }
+
+            if(reloaded.main != null && !reloaded.meta.hidden){
+                content.setCurrentMod(reloaded);
+                try{
+                    reloaded.main.loadContent();
+                }catch(Throwable e){
+                    Log.err("HOTRELOAD: content error in '@'", reloaded.name, e);
+                }
+            }
+
+            Fi contentRoot = reloaded.root.child("content");
+            if(contentRoot.exists()){
+                Seq<LoadRun> runs = new Seq<>();
+                for(ContentType type : ContentType.all){
+                    String lower = type.name().toLowerCase(Locale.ROOT);
+                    String oldName = lower + (lower.endsWith("s") ? "" : "s");
+                    Fi[] folders = {oldName.equals(type.folderName) ? null : contentRoot.child(oldName), contentRoot.child(type.folderName)};
+                    for(Fi folder : folders){
+                        if(folder != null && folder.exists()){
+                            for(Fi file : folder.findAll(f -> f.extEquals("json") || f.extEquals("hjson"))){
+                                runs.add(new LoadRun(type, file, reloaded));
+                            }
+                        }
+                    }
+                }
+                runs.sort();
+                for(LoadRun l : runs){
+                    Content current = content.getLastAdded();
+                    try{
+                        Content loaded = parser.parse(l.m, l.file.nameWithoutExtension(), l.file.readString("UTF-8"), l.file, l.type);
+                        Log.debug("[@] Loaded '@'.", l.m.meta.name, loaded);
+                    }catch(Throwable e){
+                        if(current != content.getLastAdded() && content.getLastAdded() != null){
+                            parser.markError(content.getLastAdded(), l.m, l.file, e);
+                        }else{
+                            ErrorContent error = new ErrorContent();
+                            parser.markError(error, l.m, l.file, e);
+                        }
+                    }
+                }
+            }
+            parser.finishParsing();
 
             //re-initialize the fresh mod's content
             content.setCurrentMod(reloaded);

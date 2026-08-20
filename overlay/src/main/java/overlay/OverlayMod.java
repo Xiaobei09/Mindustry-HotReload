@@ -30,7 +30,7 @@ public class OverlayMod extends Mod{
     public static Block demoWall;
 
     /** Runtime-tweakable logic knob, read every tick. Set it live from the JS console. */
-    public static float bonus = 1f;
+    public static float bonus = 2f;
 
     @Override
     public void loadContent(){
@@ -65,8 +65,8 @@ public class OverlayMod extends Mod{
         public class DemoGeneratorBuild extends GeneratorBuild{
             @Override
             public void updateTile(){
-                //pulsing production scaled by the runtime-tweakable bonus
-                productionEfficiency = enabled ? bonus * (0.8f + Mathf.sin(Time.time / 30f) * 0.2f) : 0f;
+                //constant production scaled by the runtime-tweakable bonus (was pulsating before)
+                productionEfficiency = enabled ? bonus * 2f : 0f;
             }
         }
     }

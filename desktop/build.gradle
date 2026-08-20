@@ -55,6 +55,7 @@ tasks.register('hotreloadRun', JavaExec){
     }
 
     jvmArgs += [
+        "-Xmx1g",
         "-javaagent:${rootProject.file('hotreload-agent/build/libs/hotreload-agent.jar')}",
         "-Dhotreload.dir=${rootProject.file('core/build/classes/java/main').path}",
         "-Dhotreload.poll=800",
