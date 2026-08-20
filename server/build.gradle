@@ -32,6 +32,36 @@ tasks.register('debug', JavaExec){
     debug = true
 }
 
+//HOTRELOAD: headless server run with the in-process hot-swap agent + overlay watcher.
+//Data dir defaults to <repo>/devdata so the overlay mod at devdata/mods/overlay is picked up.
+tasks.register('hotreloadRun', JavaExec){
+    dependsOn classes
+    dependsOn ':hotreload-agent:jar'
+    dependsOn ':overlay:syncDev'
+    mainClass = project.mainClassName
+    classpath = sourceSets.main.runtimeClasspath
+    standardInput = System.in
+    workingDir = rootProject.file('devdata')
+    ignoreExitValue = true
+
+    jvmArgs += [
+        "-javaagent:${rootProject.file('hotreload-agent/build/libs/hotreload-agent.jar')}",
+        "-Dhotreload.dir=${rootProject.file('core/build/classes/java/main').path}",
+        "-Dhotreload.poll=800",
+        "-Dhotreload.debounce=300"
+    ]
+
+    if(project.hasProperty("appArgs")){
+        args Eval.me(appArgs)
+    }
+    if(project.hasProperty("jvmArgs")){
+        jvmArgs((List<String>) Eval.me(project.getProperties()["jvmArgs"]))
+    }
+    if(!project.hasProperty("appArgs")){
+        args(["host"])
+    }
+}
+
 tasks.register('dist', Jar){
     dependsOn configurations.runtimeClasspath
     from files(sourceSets.main.output.classesDirs)
