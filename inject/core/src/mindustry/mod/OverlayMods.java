@@ -166,7 +166,7 @@ public class OverlayMods{
                 }
             }
         }
-        Log.info("[HOTRELOAD] overlay reload COMPLETE (@ mod(s) reloaded) [v3]", reloadedAny);
+        Log.info("[HOTRELOAD] overlay reload COMPLETE (@ mod(s) reloaded) [v5]", reloadedAny);
     }
 
     /** Runtime hot-reload of a single mod: disposes its content and classloader, reloads it
@@ -264,7 +264,10 @@ public class OverlayMods{
             for(ContentType type : ContentType.all){
                 for(Content c : Vars.content.getBy(type)){
                     if(c.minfo.mod == reloaded){
-                        try{ c.postInit(); }catch(Throwable e){ Log.err("HOTRELOAD: postInit error for '@'", c, e); }
+                        //reflective: Content.postInit() does not exist on older versions
+                        try{ c.getClass().getMethod("postInit").invoke(c); }
+                        catch(NoSuchMethodException e){ /* pre-postInit version: nothing to do */ }
+                        catch(Throwable e){ Log.err("HOTRELOAD: postInit error for '@'", c, e); }
                     }
                 }
             }

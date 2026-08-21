@@ -123,7 +123,8 @@ jobs:
             :extensions:profiling:publishToMavenLocal :backends:backend-sdl:publishToMavenLocal \
             :backends:backend-headless:publishToMavenLocal :natives:natives-desktop:publishToMavenLocal \
             :natives:natives-freetype-desktop:publishToMavenLocal :natives:natives-android:publishToMavenLocal \
-            :natives:natives-freetype-android:publishToMavenLocal -x test -x javadoc --no-daemon
+            :natives:natives-freetype-android:publishToMavenLocal \
+            :extensions:filedialogs:publishToMavenLocal :natives:natives-filedialogs:publishToMavenLocal -x test -x javadoc --no-daemon
           #fail loudly if the hash-versioned artifacts did not land
           for m in arc-core packer backend-sdl natives-desktop; do
             ls "/home/runner/.m2/repository/com/github/Anuken/Arc/$m/$h/" >/dev/null || {
