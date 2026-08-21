@@ -177,3 +177,4 @@ core/assets-raw/sprites/ui/sectors/*.json
 /overlay/.gradle/
 hotreload.log
 /hotreload-agent/build/
+/overlay/

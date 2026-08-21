@@ -45,43 +45,58 @@
 - 支持 `MINDUSTRY_DATA_DIR` / `mindustry.data.dir` 环境变量覆盖数据目录
   （headless 演示用 devdata）。
 
-## 4. 构建脚本
+## 4. 构建脚本（补丁形式维护）
+
+对上游文件的改动全部收敛为 `patches/01-hotreload.patch`（97 行新增 / 6 行删除），
+由 `scripts/make-patches.py` 以严格锚点生成（锚点失配即报错，提示版本漂移）：
 
 | 文件 | 改动 |
 |---|---|
-| `settings.gradle` | include `hotreload-agent`、`overlay` |
-| `desktop/build.gradle` | 新增 `hotreloadRun` 任务（agent + -Xmx1g + 透传 `-Doverlay.dirs`） |
-| `server/build.gradle` | 新增 `hotreloadRun`（workingDir=core/assets，注入数据目录 env） |
-| `gradle.properties` | daemon 堆 8G→1024m（WSL 3.3GB 内存约束；CI 不受影响） |
+| `settings.gradle` | include `hotreload-agent` |
+| `desktop/build.gradle` | 新增 `hotreloadRun` 任务（agent + -Xmx1g + 透传 `-Doverlay.dirs/-Doverlay.debug`） |
+| `server/build.gradle` | 新增 `hotreloadRun`（数据目录 env） |
+| `server/.../ServerLauncher.java` | 支持 MINDUSTRY_DATA_DIR 数据目录覆盖 |
+| `core/.../Mods.java` | 仅 4 处微改：parser/lastOrderedMods 去私有、loadMod 公开、load() 末尾挂 OverlayMods.init() |
+| `core/.../Content.java` | id 改为 max+1（部分重载不冲突） |
 
-## 5. overlay 示例 Mod（新增目录）
+零冲突新增文件放 `inject/`（OverlayMods.java + hotreload-agent/ 整个项目），
+`scripts/inject-hotreload.sh` = 拷贝 inject/ + git apply patches/。
+reloadMod/packModSprites 逻辑全部位于 OverlayMods.java（我们自己的文件，随意扩展），
+Mods.java 的 diff 因此保持极小。
 
-`overlay/`：可热重载的演示 Mod（`mod.hjson` hidden:false + minGameVersion 160）
-- Java 内容：silver（物品）、demo-generator（发电机）、demo-wall（墙）— `OverlayMod.java`
-- HJSON 内容：demo-ore、demo-plasma（物品）、demo-panel（5x5 红墙）、
-  demo-cannon（3x3 连发炮塔，copper 弹药）
-- `:overlay:syncDev` 把源同步到 devdata/mods/overlay（会覆盖手动放 devdata 的内容）
+本地开发：master 分支直接内联了同样的改动（gradle.properties 另有 WSL 内存调整
+8G→1024m，仅本机需要）。修改注入逻辑后运行 make-patches.py 重新生成补丁。
 
-## 6. CI（`.github/workflows/sync-upstream.yml`）
+## 5. 演示 Mod（不入库）
 
-- **stable**：每日 UTC 02:00 取上游最新 `v*` tag → 在我们 master 提交上打同名 tag →
-  构建 → 发布同名稳定版 Release（一次构建，产物复用）。
-- **nightly**：发现新版本或手动 dispatch 时构建发布 prerelease。
-- 不合并上游代码（历史独立）；tag 用 GITHUB_TOKEN 推（同 job 内构建，无需触发链）。
+`overlay/` 目录已从仓库移除（避免污染游戏源码库）。演示 mod 由
+`scripts/make-overlay.sh` 现场生成（内容纯 HJSON + base64 内嵌贴图，无编译产物，
+minGameVersion 146），输出目录 mod 或 zip。本地运行副本在 devdata/mods/overlay。
+
+## 6. CI（`.github/workflows/strict-release.yml`）——严格版本发布
+
+**jar 严格等于上游 tag**：克隆上游指定 tag 源码 → inject-hotreload.sh 注入 →
+编译 → 发布同名 Release。补丁打不上=该版本不支持，构建失败并明确报告。
+
+- 手动 dispatch：`ref`（默认最新 v-tag）、`backfill`（批量补齐缺失版本，每次最多 40 个）、
+  `nightly`（上游 master HEAD → prerelease）
+- 每日 UTC 02:00 自动 nightly
+- 资产：Mindustry-HotReload.jar / server.jar / hotreload-agent.jar / overlay.zip
 
 ## 7. 已知问题 / 注意事项
 
 - **热重载改内容后旧存档可能无法读取**（内容 id 变化 → 存档越界崩溃）。开新局即可。
 - 存档兼容性是热重载系统的固有限制，非 bug。
-- stable 与 nightly 各自构建一次（约 2×15min CI 时间）——可优化为 artifact 共享。
-- notify job 失败时会开 issue，连续失败可能刷屏。
-- fine-grained PAT 的 push **不会触发** GitHub Actions workflow（GitHub 限制），
-  因此 CI 内部闭环完成全部工作，不依赖外部 token 触发。
+- 老版本 tag（v7/v6 时代）可能因 Gradle/JDK 差异或代码漂移导致补丁失配——CI 会跳过并在
+  job summary 报告；v8 时代（约 v147+）预期全部可用。
+- fine-grained PAT 的 push **不会触发** GitHub Actions workflow（GitHub 限制）；
+  本工作流全部使用 GITHUB_TOKEN，无外部依赖。
 
 ## 8. 验证状态（2026-08-21）
 
-- ✅ 服务端/客户端（Xvfb 软渲染、WSLg 原生窗口）热重载全链路
+- ✅ 服务端/客户端（WSLg 原生窗口）热重载全链路
 - ✅ 多目录（overlay,mymod）同时监控与重载
 - ✅ 内容 id 冲突修复（27..31 连续唯一）、双重前缀修复
 - ✅ demo-cannon 弹药修复（Turret 必须定义 ammo 才会开火）
-- ✅ CI：v159.7 稳定版 + nightly 预发布均已发布
+- ✅ reloadMod 迁移至 OverlayMods 后功能回归通过
+- ✅ 补丁在 v159.7 干净树上注入成功并编译通过

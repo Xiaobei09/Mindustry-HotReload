@@ -37,7 +37,6 @@ tasks.register('debug', JavaExec){
 tasks.register('hotreloadRun', JavaExec){
     dependsOn classes
     dependsOn ':hotreload-agent:jar'
-    dependsOn ':overlay:syncDev'
     mainClass = project.mainClassName
     classpath = sourceSets.main.runtimeClasspath
     standardInput = System.in

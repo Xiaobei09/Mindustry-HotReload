@@ -43,7 +43,6 @@ tasks.register('hotreloadRun', JavaExec){
     dependsOn classes
     dependsOn ':core:compileJava'
     dependsOn ':hotreload-agent:jar'
-    dependsOn ':overlay:syncDev'
     mainClass = project.mainClassName
     classpath = sourceSets.main.runtimeClasspath
     standardInput = System.in
@@ -66,6 +65,10 @@ tasks.register('hotreloadRun', JavaExec){
     //HOTRELOAD: pass through watched overlay dirs, e.g. ./gradlew :desktop:hotreloadRun -Doverlay.dirs=overlay,mymod
     if(System.getProperty("overlay.dirs") != null){
         jvmArgs("-Doverlay.dirs=" + System.getProperty("overlay.dirs"))
+    }
+    //HOTRELOAD: verbose per-item registry dump after each reload, e.g. -Doverlay.debug=true
+    if(System.getProperty("overlay.debug") != null){
+        jvmArgs("-Doverlay.debug=" + System.getProperty("overlay.debug"))
     }
 
     if(project.hasProperty("args")){

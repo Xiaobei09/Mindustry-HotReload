@@ -42,12 +42,12 @@ public class Mods implements Loadable{
 
     private Json json = new Json();
     private @Nullable Scripts scripts;
-    private ContentParser parser = new ContentParser();
+    ContentParser parser = new ContentParser();
     private ObjectMap<String, Seq<Fi>> bundles = new ObjectMap<>();
     private ObjectSet<String> specialFolders = ObjectSet.with("bundles", "sprites", "sprites-override", ".git");
 
     /** Ordered mods cache. Set to null to invalidate. */
-    private @Nullable Seq<LoadedMod> lastOrderedMods = new Seq<>();
+    @Nullable Seq<LoadedMod> lastOrderedMods = new Seq<>();
 
     private ModClassLoader mainLoader = new ModClassLoader(getClass().getClassLoader());
 
@@ -439,166 +439,6 @@ public class Mods implements Loadable{
     @Override
     public void loadSync(){
         loadIcons();
-    }
-
-    // -----------------------------------------------------------------------------------
-    /** HOTRELOAD: runtime hot-reload of a single mod (used by the overlay dev mod).
-     * Disposes the mod's content and classloader, reloads it from disk with a fresh
-     * classloader, then re-initializes content and re-packs sprites. No restart needed.
-     * NOTE: no new methods or fields may be added to this class (hot-swap limitation) —
-     *       the per-mod content creation below is inlined into this method body.
-     * -----------------------------------------------------------------------------------*/
-    public boolean reloadMod(LoadedMod mod){
-        if(mod == null || mod.loader == null || android || ios || skipModCode) return false;
-
-        try{
-            //dispose all content owned by this mod
-            for(ContentType type : ContentType.all){
-                for(Content c : content.getBy(type).copy()){
-                    if(c.minfo.mod == mod){
-                        content.remove(c);
-                    }
-                }
-            }
-
-            //close the old classloader and drop the old mod entry
-            ClassLoaderCloser.close(mod.loader);
-            mod.dispose();
-            int index = mods.indexOf(mod);
-            mods.remove(mod);
-            lastOrderedMods = null;
-
-            //reload from disk with a fresh classloader, keeping the same position in the mod list
-            LoadedMod reloaded = loadMod(mod.file, false, true);
-            if(reloaded == null){
-                return false;
-            }
-            reloaded.state = ModState.enabled;
-            if(index >= 0){
-                mods.insert(index, reloaded);
-            }else{
-                mods.add(reloaded);
-            }
-
-            //re-create the fresh mod's content (Java + HJSON), mirroring loadContent()
-            class LoadRun implements Comparable<LoadRun>{
-                final ContentType type;
-                final Fi file;
-                final LoadedMod m;
-                LoadRun(ContentType type, Fi file, LoadedMod m){ this.type = type; this.file = file; this.m = m; }
-                @Override
-                public int compareTo(LoadRun l){
-                    int d = m.name.compareTo(l.m.name);
-                    return d != 0 ? d : file.name().compareTo(l.file.name());
-                }
-            }
-
-            if(reloaded.main != null && !reloaded.meta.hidden){
-                content.setCurrentMod(reloaded);
-                try{
-                    reloaded.main.loadContent();
-                }catch(Throwable e){
-                    Log.err("HOTRELOAD: content error in '@'", reloaded.name, e);
-                }
-                content.setCurrentMod(null);
-            }
-
-            Fi contentRoot = reloaded.root.child("content");
-            if(contentRoot.exists()){
-                Seq<LoadRun> runs = new Seq<>();
-                for(ContentType type : ContentType.all){
-                    String lower = type.name().toLowerCase(Locale.ROOT);
-                    String oldName = lower + (lower.endsWith("s") ? "" : "s");
-                    Fi[] folders = {oldName.equals(type.folderName) ? null : contentRoot.child(oldName), contentRoot.child(type.folderName)};
-                    for(Fi folder : folders){
-                        if(folder != null && folder.exists()){
-                            for(Fi file : folder.findAll(f -> f.extEquals("json") || f.extEquals("hjson"))){
-                                runs.add(new LoadRun(type, file, reloaded));
-                            }
-                        }
-                    }
-                }
-                runs.sort();
-                for(LoadRun l : runs){
-                    Content current = content.getLastAdded();
-                    try{
-                        Content loaded = parser.parse(l.m, l.file.nameWithoutExtension(), l.file.readString("UTF-8"), l.file, l.type);
-                        Log.debug("[@] Loaded '@'.", l.m.meta.name, loaded);
-                    }catch(Throwable e){
-                        if(current != content.getLastAdded() && content.getLastAdded() != null){
-                            parser.markError(content.getLastAdded(), l.m, l.file, e);
-                        }else{
-                            ErrorContent error = new ErrorContent();
-                            parser.markError(error, l.m, l.file, e);
-                        }
-                    }
-                }
-            }
-            parser.finishParsing();
-
-            //re-initialize the fresh mod's content
-            content.setCurrentMod(reloaded);
-            for(ContentType type : ContentType.all){
-                for(Content c : content.getBy(type)){
-                    if(c.minfo.mod == reloaded){
-                        try{ c.init(); }catch(Throwable e){ Log.err("HOTRELOAD: init error for '@'", c, e); }
-                    }
-                }
-            }
-            for(ContentType type : ContentType.all){
-                for(Content c : content.getBy(type)){
-                    if(c.minfo.mod == reloaded){
-                        try{ c.postInit(); }catch(Throwable e){ Log.err("HOTRELOAD: postInit error for '@'", c, e); }
-                    }
-                }
-            }
-            content.setCurrentMod(null);
-
-            if(!headless){
-                //pack new sprites into the atlas and reload icons for the fresh mod
-                packModSprites(reloaded);
-                for(ContentType type : ContentType.all){
-                    for(Content c : content.getBy(type)){
-                        if(c.minfo.mod == reloaded){
-                            try{ c.loadIcon(); }catch(Throwable e){ Log.err("HOTRELOAD: loadIcon error for '@'", c, e); }
-                            try{ c.load(); }catch(Throwable e){ Log.err("HOTRELOAD: load error for '@'", c, e); }
-                        }
-                    }
-                }
-            }
-
-            Log.info("HOTRELOAD: reloaded mod '@'", reloaded.name);
-            return true;
-        }catch(Throwable e){
-            Log.err("HOTRELOAD: failed to reload mod '@'", mod.name, e);
-            return false;
-        }
-    }
-
-    /** HOTRELOAD: packs a reloaded mod's sprite PNGs into the runtime atlas, mirroring startup naming rules. */
-    private void packModSprites(LoadedMod mod){
-        if(headless || Core.atlas == null) return;
-        Fi spritesDir = mod.root.child("sprites");
-        if(!spritesDir.exists()) return;
-
-        for(Fi file : spritesDir.findAll(f -> f.extEquals("png"))){
-            String baseName = file.nameWithoutExtension();
-            int hyphen = baseName.indexOf('-');
-            boolean prefixed = hyphen != -1 && baseName.substring(hyphen + 1).startsWith(mod.name + "-");
-            String fullName = (prefixed ? "" : mod.name + "-") + baseName;
-
-            if(Core.atlas.getRegionMap().containsKey(fullName)) continue;
-            try{
-                Pixmap pix = new Pixmap(file.readBytes());
-                Texture texture = new Texture(pix);
-                texture.setFilter(TextureFilter.linear);
-                Core.atlas.addRegion(fullName, new TextureRegion(texture));
-                pix.dispose();
-                Log.info("HOTRELOAD: packed sprite '@'", fullName);
-            }catch(Throwable e){
-                Log.err("HOTRELOAD: failed to pack sprite '@'", fullName, e);
-            }
-        }
     }
 
     private PageType getPage(Fi file){

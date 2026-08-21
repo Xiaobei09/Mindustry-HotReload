@@ -1,0 +1,132 @@
+name: Strict upstream releases
+
+# Builds releases that are STRICTLY equal to an upstream tag:
+# clone the exact tag -> inject hot-reload patches -> compile -> publish.
+# A build either applies cleanly against that exact version or fails loudly.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Upstream ref to build (tag like v159.7, branch, or empty = newest v-tag)"
+        required: false
+        default: ""
+      backfill:
+        description: "Build every upstream v-tag that has no release yet (max 40 per run)"
+        type: boolean
+        default: false
+      nightly:
+        description: "Build upstream master HEAD and publish as 'nightly' prerelease"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "0 2 * * *" # daily: nightly from upstream master HEAD
+
+env:
+  UPSTREAM: Anuken/Mindustry
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      nightly: ${{ steps.plan.outputs.nightly }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          refs="[]"
+          if [ "${{ inputs.backfill }}" = "true" ]; then
+            #every upstream v-tag we have no release for, oldest first, capped
+            git ls-remote --tags --refs "https://github.com/${UPSTREAM}.git" 'v*' \
+              | cut -d/ -f3 | sort -V > /tmp/all.txt
+            gh release list -R "$GITHUB_REPOSITORY" --limit 1000 --json tagName -q '.[].tagName' > /tmp/have.txt || true
+            refs=$(comm -23 /tmp/all.txt <(sort -V /tmp/have.txt) | head -40 | jq -R . | jq -sc .)
+          elif [ "${{ inputs.nightly }}" = "true" ] || [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "nightly=true" >> "$GITHUB_OUTPUT"
+            ref="${{ inputs.ref }}"
+            if [ -z "$ref" ]; then
+              ref=$(git ls-remote --tags --refs "https://github.com/${UPSTREAM}.git" 'v*' | cut -d/ -f3 | sort -V | tail -1)
+            fi
+            refs="[$(printf '%s' "$ref" | jq -R .)]"
+          fi
+          echo "matrix={\"ref\":$refs}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    if: ${{ needs.plan.outputs.matrix != '' && needs.plan.outputs.matrix != '{"ref":[]}' }}
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Clone upstream at ${{ matrix.ref }}
+        run: |
+          git config --global advice.detachedHead false
+          git clone -q --depth 1 --branch "${{ matrix.ref }}" "https://github.com/${UPSTREAM}.git" src
+      - name: Inject hot-reload patch set
+        run: bash scripts/inject-hotreload.sh src
+      - name: Build
+        working-directory: src
+        run: |
+          ./gradlew :desktop:dist :server:dist :hotreload-agent:jar --no-daemon -x test
+      - name: Package demo overlay mod
+        run: bash scripts/make-overlay.sh overlay.zip
+      - name: Collect artifacts
+        run: |
+          mkdir out
+          cp src/desktop/build/libs/*.jar out/Mindustry-HotReload.jar
+          cp src/server/build/libs/server-release.jar out/server.jar
+          cp src/hotreload-agent/build/libs/hotreload-agent.jar out/
+          cp overlay.zip out/
+      - name: Publish release ${{ matrix.ref }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ matrix.ref }}" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "${{ matrix.ref }}" -R "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          fi
+          gh release create "${{ matrix.ref }}" -R "$GITHUB_REPOSITORY" \
+            --target master --title "${{ matrix.ref }} (hot-reload)" \
+            --notes "Strict build of upstream \`${{ matrix.ref }}\` + hot-reload injection.
+
+          Assets: Mindustry-HotReload.jar (client), server.jar, hotreload-agent.jar, overlay.zip (demo mod)." \
+            out/*
+
+  nightly:
+    needs: plan
+    if: ${{ needs.plan.outputs.nightly == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: 17}
+      - name: Clone upstream master HEAD
+        run: git clone -q --depth 1 "https://github.com/${UPSTREAM}.git" src
+      - name: Inject + build
+        run: |
+          bash scripts/inject-hotreload.sh src
+          (cd src && ./gradlew :desktop:dist :server:dist :hotreload-agent:jar --no-daemon -x test)
+          bash scripts/make-overlay.sh overlay.zip
+          mkdir out
+          cp src/desktop/build/libs/*.jar out/Mindustry-HotReload.jar
+          cp src/server/build/libs/server-release.jar out/server.jar
+          cp src/hotreload-agent/build/libs/hotreload-agent.jar out/
+          cp overlay.zip out/
+      - name: Publish nightly prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete nightly -R "$GITHUB_REPOSITORY" --yes 2>/dev/null || true
+          gh release create nightly -R "$GITHUB_REPOSITORY" --target master --prerelease \
+            --title "nightly (upstream master + hot-reload)" \
+            --notes "Built from upstream master HEAD ($(date -u +%F)) with hot-reload patches injected." out/*

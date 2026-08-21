@@ -1,8 +1,0 @@
-name: "overlay"
-displayName: "[orange]Overlay[] (hot reload)"
-description: "Dev overlay mod for the hot-reload workflow. Edit content or code and the game applies it live."
-author: "Mindustry-HotReload"
-version: "1.0.0"
-minGameVersion: "160"
-main: "overlay.OverlayMod"
-hidden: false
