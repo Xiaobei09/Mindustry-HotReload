@@ -161,6 +161,7 @@
 - CI `strict-release.yml`：克隆上游 tag → 注入 → 编译 → 发布同名 Release（严格等于该版本）；
   支持 backfill 批量补齐（40/次）、nightly=上游 master HEAD prerelease；需 permissions: contents:write
 - 已验证：v159.7 干净树注入编译通过（本机）；CI 端到端发布成功（2m30s，4 资产）
+- 兼容下限：v142（更老版本锚点失配，不发布）
 - 旧"快照冒名"Release 已批量删除（cleanup-releases.sh，TLS 失败的单独重试）
 
 ## 9. 恢复后续工作步骤（若上下文丢失）

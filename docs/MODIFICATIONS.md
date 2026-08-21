@@ -87,8 +87,8 @@ minGameVersion 146），输出目录 mod 或 zip。本地运行副本在 devdata
 
 - **热重载改内容后旧存档可能无法读取**（内容 id 变化 → 存档越界崩溃）。开新局即可。
 - 存档兼容性是热重载系统的固有限制，非 bug。
-- 老版本 tag（v7/v6 时代）可能因 Gradle/JDK 差异或代码漂移导致补丁失配——CI 会跳过并在
-  job summary 报告；v8 时代（约 v147+）预期全部可用。
+- 补丁锚点经逐版本探测：**v142+ 可注入**（Gradle 7.5.1 + Java 17 构建通过）；
+  v141 及以下锚点失配，不支持。backfill 自动跳过 v142 以下。
 - fine-grained PAT 的 push **不会触发** GitHub Actions workflow（GitHub 限制）；
   本工作流全部使用 GITHUB_TOKEN，无外部依赖。
 
@@ -99,4 +99,4 @@ minGameVersion 146），输出目录 mod 或 zip。本地运行副本在 devdata
 - ✅ 内容 id 冲突修复（27..31 连续唯一）、双重前缀修复
 - ✅ demo-cannon 弹药修复（Turret 必须定义 ammo 才会开火）
 - ✅ reloadMod 迁移至 OverlayMods 后功能回归通过
-- ✅ 补丁在 v159.7 干净树上注入成功并编译通过
+- ✅ 补丁在 v159.7 干净树上注入成功并编译通过；v142-v146 锚点探测通过
