@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Injects the hot-reload patch set into a pristine Mindustry source tree.
 # Usage: inject-hotreload.sh <path-to-mindustry-checkout>
-# Fails loudly (set -e / git apply) if the target version has drifted.
+# Semantic anchors (make-patches.py) fail loudly if the target version drifted.
+# Verified injectable for upstream tags >= v142.
 set -euo pipefail
 
 TARGET="$(cd "$1" && pwd)"
@@ -13,8 +14,7 @@ cp "$ROOT/inject/core/src/mindustry/mod/OverlayMods.java" "$TARGET/core/src/mind
 rm -rf "$TARGET/hotreload-agent"
 cp -r "$ROOT/inject/hotreload-agent" "$TARGET/hotreload-agent"
 
-# 2. minimal diffs to upstream files
-cd "$TARGET"
-git apply --whitespace=nowarn "$ROOT"/patches/*.patch
+# 2. minimal semantic edits to upstream files (strict anchors)
+python3 "$ROOT/scripts/make-patches.py" "$TARGET"
 
 echo "Hot-reload injection complete: $TARGET"
