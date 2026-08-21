@@ -164,6 +164,19 @@
 - 兼容下限：v142（更老版本锚点失配，不发布）
 - 旧"快照冒名"Release 已批量删除（cleanup-releases.sh，TLS 失败的单独重试）
 
+## 8.1 跨版本兼容收尾（2026-08-21，全部 47 tag 发布成功）
+
+- OverlayMods 版本无关化：rebuild()/Content.postInit() 反射调用、
+  content.remove→getBy(type).liveSeq remove、ClassLoaderCloser→URLClassLoader 强转、
+  ContentType.folderName 反射回退；inject/ 与 master 两份同步改
+- Arc 依赖：jitpack 探测 arc-core+packer 双 POM，未命中则克隆 archash 源码
+  publishToMavenLocal——模块列表按该时代 settings.gradle 动态交集（老 Arc 无 filedialogs 等）；
+  JDK16 包裹（Gradle<7.3）+ -x javadoc + 发布后 ls 校验
+- 踩坑记录：gh api releases 默认分页 30 条（--paginate 才是全量）；CI 内 cd arc 后
+  相对路径要写 settings.gradle 而非 arc/settings.gradle；jnigen 模块 publish 不触发原生编译
+- 最终状态：v142~v159.7 共 47 个 Release 全部成功（各 4 资产），nightly prerelease，
+  git tags 与 releases 一一对应无孤儿
+
 ## 9. 恢复后续工作步骤（若上下文丢失）
 
 ```bash
