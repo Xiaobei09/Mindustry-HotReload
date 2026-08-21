@@ -56,7 +56,9 @@ jobs:
           fi
 
       # Push with the PAT (not GITHUB_TOKEN): pushes by GITHUB_TOKEN do not trigger
-      # workflows, so the stable build would never run.
+      # workflows, so the stable build would never run. The tag is created on OUR
+      # master commit (not the upstream tag object) — pushing upstream's own commits
+      # would require the 'workflows' permission since they contain CI files.
       - name: Push newest tag (triggers stable build)
         if: steps.tags.outputs.changed == 'true'
         env:
@@ -66,8 +68,10 @@ jobs:
             echo "::error::Secret GH_PAT is not set. Add it in Settings → Secrets → Actions."
             exit 1
           fi
+          NEWEST="${{ steps.tags.outputs.tag }}"
+          git tag -f "$NEWEST" "$GITHUB_SHA"
           git push "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git" \
-            "refs/tags/upstream/${{ steps.tags.outputs.tag }}:refs/tags/${{ steps.tags.outputs.tag }}"
+            "refs/tags/$NEWEST:refs/tags/$NEWEST"
 
   build:
     name: Build & publish nightly
