@@ -34,14 +34,13 @@ jobs:
 
       # The fork has rewritten history (unrelated to upstream), so we do NOT merge
       # upstream master anymore — we only mirror its release tags.
-      - name: Fetch upstream tags
+      - name: Find newest upstream tag
         id: tags
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git remote add upstream https://github.com/Anuken/Mindustry.git || true
-          git fetch upstream 'refs/tags/v*:refs/tags/upstream-v*' --no-tags
-          NEWEST=$(git tag -l 'upstream-v*' | sed 's|^upstream-v||' | sort -V | tail -1)
+          NEWEST=$(git ls-remote --tags --refs https://github.com/Anuken/Mindustry.git 'v*' \
+            | awk -F'/' '{print $NF}' | sort -V | tail -1)
           echo "Newest upstream stable tag: $NEWEST"
           if [ -z "$NEWEST" ]; then
             echo "::error::No upstream v-tags found."
