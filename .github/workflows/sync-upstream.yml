@@ -1,17 +1,20 @@
 # HOTRELOAD: mirror upstream release tags, build, and publish releases.
-#  - nightly (prerelease): daily 02:00 UTC + manual dispatch.
 #  - stable (v-tag): when upstream tags a new release (e.g. v159.7), the newest
-#    upstream v-tag is mirrored onto this repo (via PAT so it triggers CI) and a
-#    matching stable release is built from OUR master (fork code + hot-reload patches).
+#    upstream v-tag is mirrored onto this repo and a matching stable release is
+#    built from OUR master (fork code + hot-reload patches).
+#  - nightly (prerelease): published whenever a new upstream version was picked up,
+#    or on manual dispatch.
+#
+# Note: the fork's history is independent of upstream (rewritten), so we never merge
+# upstream code — we only mirror its version tags. Tag pushes are done with the
+# default GITHUB_TOKEN inside this workflow (they intentionally do NOT trigger other
+# workflows; the build happens right here in the same job).
 name: Sync & Release
 
 on:
   schedule:
     - cron: '0 2 * * *' # UTC 02:00 daily
   workflow_dispatch: {}
-  push:
-    tags:
-      - 'v*'
 
 permissions:
   contents: write
@@ -21,8 +24,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  sync:
-    name: Mirror upstream tags
+  stable:
+    name: Mirror newest upstream tag & publish stable
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
     outputs:
@@ -32,8 +35,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      # The fork has rewritten history (unrelated to upstream), so we do NOT merge
-      # upstream master anymore — we only mirror its release tags.
       - name: Find newest upstream tag
         id: tags
         env:
@@ -54,28 +55,83 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # Push with the PAT (not GITHUB_TOKEN): pushes by GITHUB_TOKEN do not trigger
-      # workflows, so the stable build would never run. The tag is created on OUR
-      # master commit (not the upstream tag object) — pushing upstream's own commits
-      # would require the 'workflows' permission since they contain CI files.
-      - name: Push newest tag (triggers stable build)
+      # Tag our own master commit with the upstream version number.
+      # (Pushing upstream's actual tag object would require 'workflows' permission,
+      #  since their commits contain CI files.)
+      - name: Mirror tag onto our master
         if: steps.tags.outputs.changed == 'true'
         env:
-          GH_PAT: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -z "$GH_PAT" ]; then
-            echo "::error::Secret GH_PAT is not set. Add it in Settings → Secrets → Actions."
-            exit 1
-          fi
           NEWEST="${{ steps.tags.outputs.tag }}"
           git tag -f "$NEWEST" "$GITHUB_SHA"
-          git push "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git" \
-            "refs/tags/$NEWEST:refs/tags/$NEWEST"
+          git push origin "refs/tags/$NEWEST:refs/tags/$NEWEST"
 
-  build:
+      - uses: actions/setup-java@v4
+        if: steps.tags.outputs.changed == 'true'
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle
+        if: steps.tags.outputs.changed == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/caches
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle', 'gradle/wrapper/gradle-wrapper.properties') }}
+
+      - name: Build game, server, hot-swap agent and overlay
+        if: steps.tags.outputs.changed == 'true'
+        run: ./gradlew :desktop:dist :server:dist :hotreload-agent:jar :overlay:syncDev --no-daemon
+
+      - name: Package artifacts
+        if: steps.tags.outputs.changed == 'true'
+        run: |
+          mkdir -p dist/mods
+          cp desktop/build/libs/Mindustry.jar dist/Mindustry-HotReload.jar
+          cp server/build/libs/server-release.jar dist/Mindustry-HotReload-server.jar
+          cp hotreload-agent/build/libs/hotreload-agent.jar dist/
+          cp -r devdata/mods/overlay dist/mods/overlay
+          (cd dist && zip -r mods-overlay.zip mods/overlay && rm -rf mods)
+          ls -la dist/
+
+      - name: Publish stable release
+        if: steps.tags.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.tags.outputs.tag }}"
+          cat > notes.md <<NOTES
+          Stable hot-reload build for upstream release **$TAG** (built from this fork's master).
+
+          ## What's inside
+          - **Mindustry-HotReload.jar** — full game with the HOTRELOAD runtime overlay reload built in.
+          - **Mindustry-HotReload-server.jar** — headless server (supports overlay content too).
+          - **hotreload-agent.jar** — attach it to a running JVM to hot-swap logic changes without restarting.
+          - **mods/overlay/** — drop this folder into your game's \`mods\` directory to enable live content editing.
+          NOTES
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, updating assets."
+            gh release upload "$TAG" \
+              dist/Mindustry-HotReload.jar \
+              dist/Mindustry-HotReload-server.jar \
+              dist/hotreload-agent.jar \
+              dist/mods-overlay.zip \
+              --clobber
+          else
+            gh release create "$TAG" \
+              dist/Mindustry-HotReload.jar \
+              dist/Mindustry-HotReload-server.jar \
+              dist/hotreload-agent.jar \
+              dist/mods-overlay.zip \
+              --title "Hot-reload build $TAG" \
+              --notes-file notes.md
+          fi
+
+  nightly:
     name: Build & publish nightly
-    needs: sync
-    if: always() && (needs.sync.outputs.changed == 'true' || github.event_name == 'workflow_dispatch')
+    needs: stable
+    if: always() && (needs.stable.outputs.changed == 'true' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -131,81 +187,11 @@ jobs:
             --notes-file notes.md \
             --prerelease
 
-  build-stable:
-    name: Build & publish stable (v-tag)
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    # Many mirrored tags at once would trigger one run per tag; only build the newest.
-    concurrency:
-      group: stable-release
-      cancel-in-progress: true
-    steps:
-      # Build from OUR master (fork + hot-reload patches), not from the upstream tag commit.
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: ~/.gradle/caches
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle', 'gradle/wrapper/gradle-wrapper.properties') }}
-
-      - name: Build game, server, hot-swap agent and overlay
-        run: ./gradlew :desktop:dist :server:dist :hotreload-agent:jar :overlay:syncDev --no-daemon
-
-      - name: Package artifacts
-        run: |
-          mkdir -p dist/mods
-          cp desktop/build/libs/Mindustry.jar dist/Mindustry-HotReload.jar
-          cp server/build/libs/server-release.jar dist/Mindustry-HotReload-server.jar
-          cp hotreload-agent/build/libs/hotreload-agent.jar dist/
-          cp -r devdata/mods/overlay dist/mods/overlay
-          (cd dist && zip -r mods-overlay.zip mods/overlay && rm -rf mods)
-          ls -la dist/
-
-      - name: Publish stable release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${{ github.ref_name }}"
-          cat > notes.md <<NOTES
-          Stable hot-reload build for upstream release **$TAG** (built from this fork's master).
-
-          ## What's inside
-          - **Mindustry-HotReload.jar** — full game with the HOTRELOAD runtime overlay reload built in.
-          - **Mindustry-HotReload-server.jar** — headless server (supports overlay content too).
-          - **hotreload-agent.jar** — attach it to a running JVM to hot-swap logic changes without restarting.
-          - **mods/overlay/** — drop this folder into your game's \`mods\` directory to enable live content editing.
-          NOTES
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists, updating assets."
-            gh release upload "$TAG" \
-              dist/Mindustry-HotReload.jar \
-              dist/Mindustry-HotReload-server.jar \
-              dist/hotreload-agent.jar \
-              dist/mods-overlay.zip \
-              --clobber
-          else
-            gh release create "$TAG" \
-              dist/Mindustry-HotReload.jar \
-              dist/Mindustry-HotReload-server.jar \
-              dist/hotreload-agent.jar \
-              dist/mods-overlay.zip \
-              --title "Hot-reload build $TAG" \
-              --notes-file notes.md
-          fi
-
   notify:
     name: Notify on failure
     if: failure()
     runs-on: ubuntu-latest
-    needs: [sync, build, build-stable]
+    needs: [stable, nightly]
     steps:
       - name: Comment on latest issue
         env:
