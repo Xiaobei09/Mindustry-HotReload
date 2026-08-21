@@ -161,7 +161,7 @@ public class OverlayMods{
                 }
             }
         }
-        Log.info("[HOTRELOAD] overlay reload complete (@ mod(s) reloaded).", reloadedAny);
+        Log.info("[HOTRELOAD] overlay reload COMPLETE (@ mod(s) reloaded) [v2]", reloadedAny);
     }
 
     /** Runtime hot-reload of a single mod: disposes its content and classloader, reloads it
