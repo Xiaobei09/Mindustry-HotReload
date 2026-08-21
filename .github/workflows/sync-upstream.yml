@@ -40,8 +40,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           git remote add upstream https://github.com/Anuken/Mindustry.git || true
-          git fetch upstream 'refs/tags/v*:refs/tags/upstream/*' --no-tags
-          NEWEST=$(git tag -l 'upstream/*' | sed 's|^upstream/||' | sort -V | tail -1)
+          git fetch upstream 'refs/tags/v*:refs/tags/upstream-v*' --no-tags
+          NEWEST=$(git tag -l 'upstream-v*' | sed 's|^upstream-v||' | sort -V | tail -1)
           echo "Newest upstream stable tag: $NEWEST"
           if [ -z "$NEWEST" ]; then
             echo "::error::No upstream v-tags found."
