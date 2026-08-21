@@ -1,7 +1,8 @@
-# HOTRELOAD: sync upstream Mindustry, build, and publish releases.
+# HOTRELOAD: mirror upstream release tags, build, and publish releases.
 #  - nightly (prerelease): daily 02:00 UTC + manual dispatch.
-#  - stable (v-tag): when upstream tags a new release (e.g. v159.7), we mirror the tag
-#    and publish a matching stable release.
+#  - stable (v-tag): when upstream tags a new release (e.g. v159.7), the newest
+#    upstream v-tag is mirrored onto this repo (via PAT so it triggers CI) and a
+#    matching stable release is built from OUR master (fork code + hot-reload patches).
 name: Sync & Release
 
 on:
@@ -15,43 +16,58 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: sync-release
+  cancel-in-progress: false
+
 jobs:
   sync:
-    name: Sync upstream
+    name: Mirror upstream tags
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
     outputs:
-      changed: ${{ steps.merge.outputs.changed }}
+      changed: ${{ steps.tags.outputs.changed }}
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Merge upstream
-        id: merge
+      # The fork has rewritten history (unrelated to upstream), so we do NOT merge
+      # upstream master anymore — we only mirror its release tags.
+      - name: Fetch upstream tags
+        id: tags
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git remote add upstream https://github.com/Anuken/Mindustry.git || true
-          git fetch upstream master --tags
-          BEFORE=$(git rev-parse HEAD)
-          git merge --no-edit --no-ff upstream/master || {
-            echo "::error::Merge conflict with upstream. Resolve manually on branch master."
+          git fetch upstream 'refs/tags/v*:refs/tags/upstream/*' --no-tags
+          NEWEST=$(git tag -l 'upstream/*' | sed 's|^upstream/||' | sort -V | tail -1)
+          echo "Newest upstream stable tag: $NEWEST"
+          if [ -z "$NEWEST" ]; then
+            echo "::error::No upstream v-tags found."
             exit 1
-          }
-          AFTER=$(git rev-parse HEAD)
-          if [ "$BEFORE" = "$AFTER" ]; then
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$NEWEST" >/dev/null 2>&1; then
+            echo "Tag $NEWEST already mirrored."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
+            echo "tag=$NEWEST" >> "$GITHUB_OUTPUT"
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            git log --oneline -5
           fi
 
-      - name: Push merged changes
-        if: steps.merge.outputs.changed == 'true'
-        run: git push origin master
-
-      - name: Mirror upstream version tags
+      # Push with the PAT (not GITHUB_TOKEN): pushes by GITHUB_TOKEN do not trigger
+      # workflows, so the stable build would never run.
+      - name: Push newest tag (triggers stable build)
+        if: steps.tags.outputs.changed == 'true'
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          git push origin --tags --follow-tags 2>/dev/null || git push origin --tags
+          if [ -z "$GH_PAT" ]; then
+            echo "::error::Secret GH_PAT is not set. Add it in Settings → Secrets → Actions."
+            exit 1
+          fi
+          git push "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git" \
+            "refs/tags/upstream/${{ steps.tags.outputs.tag }}:refs/tags/${{ steps.tags.outputs.tag }}"
 
   build:
     name: Build & publish nightly
@@ -92,7 +108,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > notes.md <<'NOTES'
-          Automatically synced from upstream [Anuken/Mindustry](https://github.com/Anuken/Mindustry) and built with the in-process hot-swap agent.
+          Built from this fork's master with the in-process hot-swap agent.
 
           ## What's inside
           - **Mindustry-HotReload.jar** — full game with the HOTRELOAD runtime overlay reload built in.
@@ -102,8 +118,7 @@ jobs:
 
           > Nightly pre-release. For tagged stable builds matching upstream releases, see the Releases page.
           NOTES
-          VERSION="v$(date -u +%Y.%m.%d)"
-          gh release delete nightly --yes || true
+          gh release delete nightly --yes --cleanup-tag || true
           gh release create nightly \
             dist/Mindustry-HotReload.jar \
             dist/Mindustry-HotReload-server.jar \
@@ -117,11 +132,15 @@ jobs:
     name: Build & publish stable (v-tag)
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    # Many mirrored tags at once would trigger one run per tag; only build the newest.
+    concurrency:
+      group: stable-release
+      cancel-in-progress: true
     steps:
+      # Build from OUR master (fork + hot-reload patches), not from the upstream tag commit.
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ github.ref }}
 
       - uses: actions/setup-java@v4
         with:
@@ -152,14 +171,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ github.ref_name }}"
-          cat > notes.md <<'NOTES'
-          Stable hot-reload build matching upstream release **$TAG**.
+          cat > notes.md <<NOTES
+          Stable hot-reload build for upstream release **$TAG** (built from this fork's master).
 
           ## What's inside
           - **Mindustry-HotReload.jar** — full game with the HOTRELOAD runtime overlay reload built in.
           - **Mindustry-HotReload-server.jar** — headless server (supports overlay content too).
           - **hotreload-agent.jar** — attach it to a running JVM to hot-swap logic changes without restarting.
-          - **mods/overlay/** — drop this folder into your game's `mods` directory to enable live content editing.
+          - **mods/overlay/** — drop this folder into your game's \`mods\` directory to enable live content editing.
           NOTES
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists, updating assets."
