@@ -146,7 +146,12 @@ public class OverlayMods{
                 reloadedAny++;
                 if(!Vars.headless && Vars.ui != null && Vars.ui.hudfrag != null && Vars.ui.hudfrag.blockfrag != null){
                     //rebuild the block placement menu so new/removed blocks show up
-                    Vars.ui.hudfrag.blockfrag.rebuild();
+                    //(reflective: rebuild() is not public on older versions)
+                    try{
+                        Vars.ui.hudfrag.blockfrag.getClass().getMethod("rebuild").invoke(Vars.ui.hudfrag.blockfrag);
+                    }catch(ReflectiveOperationException e){
+                        Log.info("[HOTRELOAD] block menu rebuild not available on this version");
+                    }
                 }
                 Log.info("[HOTRELOAD] core hot-swap OK: '@' now contributes @ content entries.",
                     name0,
@@ -161,14 +166,14 @@ public class OverlayMods{
                 }
             }
         }
-        Log.info("[HOTRELOAD] overlay reload complete (@ mod(s) reloaded).", reloadedAny);
+        Log.info("[HOTRELOAD] overlay reload COMPLETE (@ mod(s) reloaded) [v3]", reloadedAny);
     }
 
     /** Runtime hot-reload of a single mod: disposes its content and classloader, reloads it
      * from disk with a fresh classloader, then re-initializes content and re-packs sprites.
      * Mirrors {@code Mods.loadContent()} but scoped to one mod; no restart needed. */
     static boolean reloadMod(LoadedMod mod){
-        if(mod == null || mod.loader == null || Vars.android || Vars.ios || Vars.skipModCode) return false;
+        if(mod == null || mod.loader == null || Vars.android || Vars.ios) return false;
         Mods mods = Vars.mods;
 
         try{
@@ -176,13 +181,15 @@ public class OverlayMods{
             for(ContentType type : ContentType.all){
                 for(Content c : Vars.content.getBy(type).copy()){
                     if(c.minfo.mod == mod){
-                        Vars.content.remove(c);
+                        //live-seq removal: ContentLoader.remove() does not exist on older versions
+                        Vars.content.getBy(type).remove(c);
                     }
                 }
             }
 
             //close the old classloader and drop the old mod entry
-            ClassLoaderCloser.close(mod.loader);
+            //ModClassLoader extends URLClassLoader on every supported version
+            ((java.net.URLClassLoader)mod.loader).close();
             mod.dispose();
             int index = mods.mods.indexOf(mod);
             mods.mods.remove(mod);
@@ -217,10 +224,11 @@ public class OverlayMods{
                 for(ContentType type : ContentType.all){
                     String lower = type.name().toLowerCase(Locale.ROOT);
                     String oldName = lower + (lower.endsWith("s") ? "" : "s");
-                    Fi[] folders = {oldName.equals(type.folderName) ? null : contentRoot.child(oldName), contentRoot.child(type.folderName)};
-                    for(Fi folder : folders){
-                        if(folder != null && folder.exists()){
-                            for(Fi file : folder.findAll(f -> f.extEquals("json") || f.extEquals("hjson"))){
+                    String folder = folderName(type);
+                    Fi[] folders = {oldName.equals(folder) ? null : contentRoot.child(oldName), contentRoot.child(folder)};
+                    for(Fi sub : folders){
+                        if(sub != null && sub.exists()){
+                            for(Fi file : sub.findAll(f -> f.extEquals("json") || f.extEquals("hjson"))){
                                 runs.add(new LoadRun(type, file, reloaded));
                             }
                         }
@@ -306,6 +314,16 @@ public class OverlayMods{
             }catch(Throwable e){
                 Log.err("HOTRELOAD: failed to pack sprite '@'", fullName, e);
             }
+        }
+    }
+
+    /** ContentType.folderName does not exist on older versions; fall back to the old convention. */
+    private static String folderName(ContentType type){
+        try{
+            return (String)ContentType.class.getField("folderName").get(type);
+        }catch(ReflectiveOperationException e){
+            String lower = type.name().toLowerCase(Locale.ROOT);
+            return lower + (lower.endsWith("s") ? "" : "s");
         }
     }
 
