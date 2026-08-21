@@ -14,7 +14,12 @@ name: Sync & Release
 on:
   schedule:
     - cron: '0 2 * * *' # UTC 02:00 daily
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: 'Publish releases for ALL upstream v-tags missing one (not just newest)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -35,37 +40,60 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Find newest upstream tag
+      - name: Find missing upstream tags
         id: tags
         env:
           GH_TOKEN: ${{ github.token }}
+          BACKFILL: ${{ inputs.backfill || false }}
         run: |
-          NEWEST=$(git ls-remote --tags --refs https://github.com/Anuken/Mindustry.git 'v*' \
-            | awk -F'/' '{print $NF}' | sort -V | tail -1)
+          ALL=$(git ls-remote --tags --refs https://github.com/Anuken/Mindustry.git 'v*' \
+            | awk -F'/' '{print $NF}' | sort -V | uniq)
+          NEWEST=$(echo "$ALL" | tail -1)
           echo "Newest upstream stable tag: $NEWEST"
           if [ -z "$NEWEST" ]; then
             echo "::error::No upstream v-tags found."
             exit 1
           fi
-          if git ls-remote --exit-code --tags origin "refs/tags/$NEWEST" >/dev/null 2>&1; then
-            echo "Tag $NEWEST already mirrored."
+
+          MISSING=""
+          for t in $ALL; do
+            git ls-remote --exit-code --tags origin "refs/tags/$t" >/dev/null 2>&1 && continue
+            # backfill mode: every tag without a release; normal mode: newest only
+            if [ "$BACKFILL" = "true" ] || ! gh release view "$t" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              MISSING="$MISSING $t"
+            fi
+          done
+          # normal (non-backfill) mode only ever adds the newest tag
+          if [ "$BACKFILL" != "true" ]; then
+            if git ls-remote --exit-code --tags origin "refs/tags/$NEWEST" >/dev/null 2>&1 \
+               || gh release view "$NEWEST" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              MISSING=""
+            else
+              MISSING="$NEWEST"
+            fi
+          fi
+
+          if [ -z "${MISSING// /}" ]; then
+            echo "Nothing to mirror — all handled."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=$NEWEST" >> "$GITHUB_OUTPUT"
+            echo "Missing tags:$MISSING"
+            echo "list=${MISSING# }" >> "$GITHUB_OUTPUT"
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # Tag our own master commit with the upstream version number.
-      # (Pushing upstream's actual tag object would require 'workflows' permission,
+      # Tag our own master commit with the upstream version numbers.
+      # (Pushing upstream's actual tag objects would require 'workflows' permission,
       #  since their commits contain CI files.)
-      - name: Mirror tag onto our master
+      - name: Mirror tags onto our master
         if: steps.tags.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          NEWEST="${{ steps.tags.outputs.tag }}"
-          git tag -f "$NEWEST" "$GITHUB_SHA"
-          git push origin "refs/tags/$NEWEST:refs/tags/$NEWEST"
+          for t in ${{ steps.tags.outputs.list }}; do
+            git tag -f "$t" "$GITHUB_SHA"
+            git push origin "refs/tags/$t:refs/tags/$t"
+          done
 
       - uses: actions/setup-java@v4
         if: steps.tags.outputs.changed == 'true'
@@ -95,38 +123,34 @@ jobs:
           (cd dist && zip -r mods-overlay.zip mods/overlay && rm -rf mods)
           ls -la dist/
 
-      - name: Publish stable release
+      - name: Publish stable releases
         if: steps.tags.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ steps.tags.outputs.tag }}"
-          cat > notes.md <<NOTES
-          Stable hot-reload build for upstream release **$TAG** (built from this fork's master).
+          cat > notes.md <<'NOTES'
+          Stable hot-reload build for upstream release **__TAG__** (built from this fork's master).
 
           ## What's inside
           - **Mindustry-HotReload.jar** — full game with the HOTRELOAD runtime overlay reload built in.
           - **Mindustry-HotReload-server.jar** — headless server (supports overlay content too).
           - **hotreload-agent.jar** — attach it to a running JVM to hot-swap logic changes without restarting.
-          - **mods/overlay/** — drop this folder into your game's \`mods\` directory to enable live content editing.
+          - **mods/overlay/** — drop this folder into your game's `mods` directory to enable live content editing.
+
+          > The jar is built from this fork's current master; the version number mirrors the upstream release for tracking.
           NOTES
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists, updating assets."
-            gh release upload "$TAG" \
-              dist/Mindustry-HotReload.jar \
-              dist/Mindustry-HotReload-server.jar \
-              dist/hotreload-agent.jar \
-              dist/mods-overlay.zip \
-              --clobber
-          else
-            gh release create "$TAG" \
-              dist/Mindustry-HotReload.jar \
-              dist/Mindustry-HotReload-server.jar \
-              dist/hotreload-agent.jar \
-              dist/mods-overlay.zip \
-              --title "Hot-reload build $TAG" \
-              --notes-file notes.md
-          fi
+          ASSETS=(dist/Mindustry-HotReload.jar dist/Mindustry-HotReload-server.jar dist/hotreload-agent.jar dist/mods-overlay.zip)
+          for TAG in ${{ steps.tags.outputs.list }}; do
+            sed "s/__TAG__/$TAG/g" notes.md > notes-final.md
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              echo "Release $TAG already exists, updating assets."
+              gh release upload "$TAG" "${ASSETS[@]}" --clobber
+            else
+              gh release create "$TAG" "${ASSETS[@]}" \
+                --title "Hot-reload build $TAG" \
+                --notes-file notes-final.md
+            fi
+          done
 
   nightly:
     name: Build & publish nightly
