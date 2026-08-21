@@ -46,8 +46,10 @@ jobs:
             #every upstream v-tag we have no release for, oldest first, capped
             git ls-remote --tags --refs "https://github.com/${UPSTREAM}.git" 'v*' \
               | cut -d/ -f3 | sort -V > /tmp/all.txt
+            #hot-reload patches anchor on v8/v7-late code; older tags cannot be injected
+            awk '{n=substr($0,2)+0; if(n>=142) print}' /tmp/all.txt > /tmp/supported.txt
             gh release list -R "$GITHUB_REPOSITORY" --limit 1000 --json tagName -q '.[].tagName' > /tmp/have.txt || true
-            refs=$(awk 'NR==FNR{have[$0];next} !($0 in have)' /tmp/have.txt /tmp/all.txt | head -40 | jq -R . | jq -sc .)
+            refs=$(awk 'NR==FNR{have[$0];next} !($0 in have)' /tmp/have.txt /tmp/supported.txt | head -40 | jq -R . | jq -sc .)
           elif [ "${{ inputs.nightly }}" = "true" ] || [ "${{ github.event_name }}" = "schedule" ]; then
             echo "nightly=true" >> "$GITHUB_OUTPUT"
           else
