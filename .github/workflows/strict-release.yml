@@ -81,6 +81,55 @@ jobs:
           git clone -q --depth 1 --branch "${{ matrix.ref }}" "https://github.com/${UPSTREAM}.git" src
       - name: Inject hot-reload patch set
         run: bash scripts/inject-hotreload.sh src
+
+      - name: Check Arc availability on jitpack
+        id: arc
+        run: |
+          h=$(grep -oE '^archash=[0-9a-f]+' src/gradle.properties | cut -d= -f2)
+          echo "hash=$h" >> "$GITHUB_OUTPUT"
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+            "https://jitpack.io/com/github/Anuken/Arc/arc-core/$h/arc-core-$h.pom" || true)
+          if [ "$code" = "200" ]; then
+            echo "miss=false" >> "$GITHUB_OUTPUT"
+          else
+            #jitpack purged old builds; rebuild Arc from source at the pinned commit
+            echo "miss=true" >> "$GITHUB_OUTPUT"
+            gver=$(curl -sfL "https://raw.githubusercontent.com/Anuken/Arc/$h/gradle/wrapper/gradle-wrapper.properties" \
+              | grep -oE 'gradle-[0-9.]+' | grep -oE '[0-9]+\.[0-9]+')
+            major=${gver%%.*}; minor=${gver#*.}; minor=${minor%%.*}
+            if [ "$major" -eq 7 ] && [ "$minor" -lt 3 ] || [ "$major" -lt 7 ]; then
+              echo "oldgradle=true" >> "$GITHUB_OUTPUT" #Gradle <7.3 cannot run on JDK 17
+            fi
+          fi
+
+      - uses: actions/setup-java@v4
+        if: steps.arc.outputs.miss == 'true' && steps.arc.outputs.oldgradle == 'true'
+        with:
+          distribution: temurin
+          java-version: 16
+
+      - name: Build Arc ${{ steps.arc.outputs.hash }} into mavenLocal
+        if: steps.arc.outputs.miss == 'true'
+        run: |
+          h=${{ steps.arc.outputs.hash }}
+          git clone -q https://github.com/Anuken/Arc arc
+          cd arc && git checkout -q $h
+          #publish under the hash so Mindustry's com.github.Anuken.Arc:<mod>:$h resolves
+          sed -i "s/version = '1\.0'/version = '$h'/" build.gradle
+          ./gradlew :arc-core:publishToMavenLocal :extensions:freetype:publishToMavenLocal \
+            :extensions:fx:publishToMavenLocal :extensions:arcnet:publishToMavenLocal \
+            :extensions:flabel:publishToMavenLocal :extensions:packer:publishToMavenLocal \
+            :extensions:g3d:publishToMavenLocal :extensions:discord:publishToMavenLocal \
+            :extensions:profiling:publishToMavenLocal :backends:backend-sdl:publishToMavenLocal \
+            :backends:backend-headless:publishToMavenLocal :natives:natives-desktop:publishToMavenLocal \
+            :natives:natives-freetype-desktop:publishToMavenLocal -x test --no-daemon
+
+      - uses: actions/setup-java@v4
+        if: steps.arc.outputs.miss == 'true' && steps.arc.outputs.oldgradle == 'true'
+        with:
+          distribution: temurin
+          java-version: 17
+
       - name: Build
         working-directory: src
         run: |
