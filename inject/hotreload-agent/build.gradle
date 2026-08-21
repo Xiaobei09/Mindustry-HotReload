@@ -2,6 +2,8 @@
 apply plugin: 'java'
 
 tasks.withType(JavaCompile){
+    //--release wins over any sourceCompatibility the host build sets globally
+    options.release = 17
     targetCompatibility = JavaVersion.VERSION_17
     sourceCompatibility = JavaVersion.VERSION_17
     options.encoding = 'UTF-8'
