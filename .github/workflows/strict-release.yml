@@ -47,6 +47,7 @@ jobs:
             refs=$(comm -23 /tmp/all.txt <(sort -V /tmp/have.txt) | head -40 | jq -R . | jq -sc .)
           elif [ "${{ inputs.nightly }}" = "true" ] || [ "${{ github.event_name }}" = "schedule" ]; then
             echo "nightly=true" >> "$GITHUB_OUTPUT"
+          else
             ref="${{ inputs.ref }}"
             if [ -z "$ref" ]; then
               ref=$(git ls-remote --tags --refs "https://github.com/${UPSTREAM}.git" 'v*' | cut -d/ -f3 | sort -V | tail -1)
