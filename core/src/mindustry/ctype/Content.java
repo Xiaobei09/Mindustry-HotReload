@@ -18,7 +18,13 @@ public abstract class Content implements Comparable<Content>{
     public boolean removed;
 
     public Content(){
-        this.id = (short)Vars.content.getBy(getContentType()).size;
+        //HOTRELOAD: assign a unique id (max+1) instead of list size, so partially reloaded
+        //content (a single mod being hot-reloaded) never collides with ids of remaining content.
+        short max = 0;
+        for(Content c : Vars.content.getBy(getContentType())){
+            if(c.id >= max) max = (short)(c.id + 1);
+        }
+        this.id = max;
         Vars.content.handleContent(this);
     }
 

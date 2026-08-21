@@ -500,6 +500,7 @@ public class Mods implements Loadable{
                 }catch(Throwable e){
                     Log.err("HOTRELOAD: content error in '@'", reloaded.name, e);
                 }
+                content.setCurrentMod(null);
             }
 
             Fi contentRoot = reloaded.root.child("content");

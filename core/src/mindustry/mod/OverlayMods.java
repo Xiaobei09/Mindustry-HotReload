@@ -142,6 +142,11 @@ public class OverlayMods{
                 Log.info("[HOTRELOAD] core hot-swap OK: '@' now contributes @ content entries.",
                     name,
                     Vars.content.getBy(mindustry.ctype.ContentType.item).count(c -> ((mindustry.ctype.MappableContent)c).name.startsWith(name + "-")));
+                Log.info("[HOTRELOAD] item registry dump:");
+                for(Object c : Vars.content.getBy(mindustry.ctype.ContentType.item)){
+                    mindustry.ctype.MappableContent mc = (mindustry.ctype.MappableContent)c;
+                    Log.info("  item '@' id=@ identity=@ mod=@", mc.name, mc.id, System.identityHashCode(mc), mc.minfo.mod == null ? "?" : mc.minfo.mod.name);
+                }
             }
         }
         Log.info("[HOTRELOAD] overlay reload complete (@ mod(s) reloaded).", reloadedAny);
