@@ -123,7 +123,7 @@ jobs:
           whitelist="arc-core extensions:freetype extensions:fx extensions:arcnet extensions:flabel extensions:packer extensions:g3d extensions:discord extensions:profiling extensions:filedialogs backends:backend-sdl backends:backend-sdl3 backends:backend-headless natives:natives-desktop natives:natives-freetype-desktop natives:natives-filedialogs natives:natives-android natives:natives-freetype-android"
           tasks=""
           for m in $whitelist; do
-            grep -q "\":$m\"" arc/settings.gradle && tasks="$tasks :$m:publishToMavenLocal"
+            grep -q "\":$m\"" settings.gradle && tasks="$tasks :$m:publishToMavenLocal"
           done
           echo "publishing:$tasks"
           ./gradlew $tasks -x test -x javadoc --no-daemon
