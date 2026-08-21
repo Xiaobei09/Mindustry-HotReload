@@ -150,7 +150,33 @@
 - 图形界面下热重载验证：改 demo-ore 颜色→实时变红、改 mymod my-ore→变蓝、touch OverlayMods.class→
   hot-swapped（均通过）。截图/HTTP/VNC 服务已停（窗口直显，不再需要）。
 
-## 8. 恢复后续工作步骤（若上下文丢失）
+## 8. 严格版本发布架构（2026-08-21 重构）
+
+- 仓库不再内联改动发布：`patches/01-hotreload.patch`（97 行，make-patches.py 以严格锚点生成）
+  + `inject/`（OverlayMods.java、hotreload-agent/ 零冲突新文件）
+- `scripts/inject-hotreload.sh`：干净上游树 = 拷贝 inject + git apply patches
+- `scripts/make-overlay.sh`：现场生成演示 mod（纯 HJSON+base64 贴图），overlay/ 已移出 git
+- reloadMod/packModSprites 全部迁入 OverlayMods.java；Mods.java 仅剩 4 个微 hunk
+  （parser/lastOrderedMods 去私有、loadMod public、load() 挂 init()）
+- CI `strict-release.yml`：克隆上游 tag → 注入 → 编译 → 发布同名 Release（严格等于该版本）；
+  支持 backfill 批量补齐（40/次）、nightly=上游 master HEAD prerelease；需 permissions: contents:write
+- 已验证：v159.7 干净树注入编译通过（本机）；CI 端到端发布成功（2m30s，4 资产）
+- 旧"快照冒名"Release 已批量删除（cleanup-releases.sh，TLS 失败的单独重试）
+
+## 9. 恢复后续工作步骤（若上下文丢失）
+
+```bash
+cd /root/Mindustry-HotReload
+git fetch origin && git pull        # 拉最新（含进度文档）
+# 查看 CI:
+gh run list --repo Xiaobei09/Mindustry-HotReload --limit 5
+# 补发缺失版本（重复执行直到没有缺失）:
+gh workflow run strict-release.yml --repo Xiaobei09/Mindustry-HotReload -f backfill=true
+# 本地验证注入流水线:
+curl -sL -o /root/work/v.tar.gz https://github.com/Anuken/Mindustry/archive/refs/tags/v159.7.tar.gz
+cd /root/work && tar xzf v.tar.gz && bash ~/Mindustry-HotReload/scripts/inject-hotreload.sh Mindustry-159.7
+```
+
 
 ```bash
 cd /root/Mindustry-HotReload
