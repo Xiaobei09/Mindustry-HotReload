@@ -87,9 +87,12 @@ jobs:
         run: |
           h=$(grep -oE '^archash=[0-9a-f]+' src/gradle.properties | cut -d= -f2)
           echo "hash=$h" >> "$GITHUB_OUTPUT"
-          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+          #buildscript needs packer too; jitpack may have only some modules cached
+          c1=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
             "https://jitpack.io/com/github/Anuken/Arc/arc-core/$h/arc-core-$h.pom" || true)
-          if [ "$code" = "200" ]; then
+          c2=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+            "https://jitpack.io/com/github/Anuken/Arc/packer/$h/packer-$h.pom" || true)
+          if [ "$c1" = "200" ] && [ "$c2" = "200" ]; then
             echo "miss=false" >> "$GITHUB_OUTPUT"
           else
             #jitpack purged old builds; rebuild Arc from source at the pinned commit
@@ -116,15 +119,14 @@ jobs:
           cd arc && git checkout -q $h
           #publish as com.github.Anuken.Arc:<mod>:$h so Mindustry's deps resolve
           sed -i "s/group = 'com\.github\.Anuken'/group = 'com.github.Anuken.Arc'/; s/version = '1\.0'/version = '$h'/" build.gradle
-          ./gradlew :arc-core:publishToMavenLocal :extensions:freetype:publishToMavenLocal \
-            :extensions:fx:publishToMavenLocal :extensions:arcnet:publishToMavenLocal \
-            :extensions:flabel:publishToMavenLocal :extensions:packer:publishToMavenLocal \
-            :extensions:g3d:publishToMavenLocal :extensions:discord:publishToMavenLocal \
-            :extensions:profiling:publishToMavenLocal :backends:backend-sdl:publishToMavenLocal \
-            :backends:backend-headless:publishToMavenLocal :natives:natives-desktop:publishToMavenLocal \
-            :natives:natives-freetype-desktop:publishToMavenLocal :natives:natives-android:publishToMavenLocal \
-            :natives:natives-freetype-android:publishToMavenLocal \
-            :extensions:filedialogs:publishToMavenLocal :natives:natives-filedialogs:publishToMavenLocal -x test -x javadoc --no-daemon
+          #publish whatever desktop-relevant modules this Arc era actually has
+          whitelist="arc-core extensions:freetype extensions:fx extensions:arcnet extensions:flabel extensions:packer extensions:g3d extensions:discord extensions:profiling extensions:filedialogs backends:backend-sdl backends:backend-sdl3 backends:backend-headless natives:natives-desktop natives:natives-freetype-desktop natives:natives-filedialogs natives:natives-android natives:natives-freetype-android"
+          tasks=""
+          for m in $whitelist; do
+            grep -q "\":$m\"" arc/settings.gradle && tasks="$tasks :$m:publishToMavenLocal"
+          done
+          echo "publishing:$tasks"
+          ./gradlew $tasks -x test -x javadoc --no-daemon
           #fail loudly if the hash-versioned artifacts did not land
           for m in arc-core packer backend-sdl natives-desktop; do
             ls "/home/runner/.m2/repository/com/github/Anuken/Arc/$m/$h/" >/dev/null || {
